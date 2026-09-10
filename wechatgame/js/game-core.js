@@ -418,6 +418,45 @@ Game.prototype._bindJelly = function () {
   });
 };
 
+
+Game.prototype._drainTouchQueue = function () {
+  var g = typeof GameGlobal !== 'undefined' ? GameGlobal : (typeof globalThis !== 'undefined' ? globalThis : null);
+  if (!g || !g.__meltTouchQ) return;
+  var q = g.__meltTouchQ;
+  while (q.length) {
+    var ev = q.shift();
+    if (!ev) continue;
+    var sx = ev.x;
+    var sy = ev.y;
+    if (this.pixelRatio > 1 && sx > this.screenW * 1.2) {
+      sx = sx / this.pixelRatio;
+      sy = sy / this.pixelRatio;
+    }
+    if (g.__meltTouchStat) {
+      this._debugTouch = {
+        x: Math.round(sx),
+        y: Math.round(sy),
+        mode: (ev.type || '?') + (ev.ok ? '' : '!'),
+      };
+    }
+    if (ev.type === 'start') this._onTouchStart(sx, sy);
+    else if (ev.type === 'move') this._onTouchMove(sx, sy);
+    else if (ev.type === 'end') {
+      if (this.pointerMode === 'aiming') this._onTouchMove(sx, sy);
+      this._onTouchEnd();
+    } else if (ev.type === 'cancel') {
+      this.pointerMode = 'cancelled';
+      this.aiming = false;
+    }
+  }
+  if (g.__meltTouchStat && g.__meltTouchStat.last) {
+    // 附带全局计数，确认入口层是否收到事件
+    var st = g.__meltTouchStat;
+    if (!this._debugTouch) this._debugTouch = { x: 0, y: 0, mode: 'idle' };
+    this._debugTouch.mode = (this._debugTouch.mode || 'idle') + ' #' + st.n;
+  }
+};
+
 Game.prototype._touchXY = function (e, fromChanged) {
   var list = fromChanged
     ? e.changedTouches || e.touches
@@ -658,6 +697,8 @@ Game.prototype._restart = function () {
 };
 
 Game.prototype._update = function (dt) {
+  this._drainTouchQueue();
+
   fixedStep(this.engine, dt, this.physAccum);
 
   var bodies = this.engine.world.bodies;
@@ -804,8 +845,10 @@ Game.prototype._drawHUD = function (ctx) {
   ctx.textBaseline = 'top';
   ctx.fillStyle = 'rgba(120, 90, 70, 0.55)';
   ctx.font = '10px sans-serif';
+  var g = typeof GameGlobal !== 'undefined' ? GameGlobal : null;
+  var bridge = g && g.__meltTouchStat ? (' | ' + g.__meltTouchStat.last + ' n=' + g.__meltTouchStat.n) : '';
   ctx.fillText(
-    'touch:' + dbg.x + ',' + dbg.y + ' mode:' + (dbg.mode || 'idle'),
+    'touch:' + dbg.x + ',' + dbg.y + ' mode:' + (dbg.mode || 'idle') + bridge,
     10,
     hudH - 14
   );
