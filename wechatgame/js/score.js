@@ -1,41 +1,27 @@
 /**
- * 得分与最高分（wx 本地存储）
+ * 大西瓜计数（本局 melonCount；历史最高存 melt-melon-melon-high）
  */
-var HIGH_SCORE_KEY = 'melt-melon-highscore';
+var MELON_HIGH_KEY = 'melt-melon-melon-high';
 
 function ScoreManager() {
-  this.score = 0;
-  this.highScore = 0;
-  this._chain = 0;
-  this.highScore = this._loadHigh();
+  this.melonCount = 0;
+  this.melonHigh = this._loadHigh();
 }
 
 ScoreManager.prototype.reset = function () {
-  this.score = 0;
-  this._chain = 0;
+  this.melonCount = 0;
 };
 
-/** 合成得分：基础分 * 连消加成 */
-ScoreManager.prototype.addMerge = function (baseScore) {
-  this._chain += 1;
-  var bonusMul = 1 + (this._chain - 1) * 0.5;
-  var gained = Math.round(baseScore * bonusMul);
-  this.score += gained;
+/** 合成出最高级水果时 +1，并刷新历史最高 */
+ScoreManager.prototype.addMelon = function () {
+  this.melonCount += 1;
   this._persistHigh();
-  return gained;
-};
-
-ScoreManager.prototype.resetChain = function () {
-  this._chain = 0;
-};
-
-ScoreManager.prototype.getChain = function () {
-  return this._chain;
+  return this.melonCount;
 };
 
 ScoreManager.prototype._loadHigh = function () {
   try {
-    var raw = wx.getStorageSync(HIGH_SCORE_KEY);
+    var raw = wx.getStorageSync(MELON_HIGH_KEY);
     var n = raw !== '' && raw != null ? Number(raw) : 0;
     return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
   } catch (e) {
@@ -44,10 +30,10 @@ ScoreManager.prototype._loadHigh = function () {
 };
 
 ScoreManager.prototype._persistHigh = function () {
-  if (this.score > this.highScore) {
-    this.highScore = this.score;
+  if (this.melonCount > this.melonHigh) {
+    this.melonHigh = this.melonCount;
     try {
-      wx.setStorageSync(HIGH_SCORE_KEY, String(this.highScore));
+      wx.setStorageSync(MELON_HIGH_KEY, String(this.melonHigh));
     } catch (e) {
       /* ignore */
     }
@@ -56,5 +42,5 @@ ScoreManager.prototype._persistHigh = function () {
 
 module.exports = {
   ScoreManager: ScoreManager,
-  HIGH_SCORE_KEY: HIGH_SCORE_KEY,
+  MELON_HIGH_KEY: MELON_HIGH_KEY,
 };

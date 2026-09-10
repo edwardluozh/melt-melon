@@ -6,7 +6,7 @@ var fruits = require('./fruits.js');
 /**
  * Process SoftWorld contacts once per frame.
  * @param {object} softWorld
- * @param {(baseScore:number, fromLevel:number, x:number, y:number)=>void} onMerge
+ * @param {(newLevel:number, fromLevel:number, x:number, y:number)=>void} onMerge
  * @param {()=>boolean} isActive
  * @returns {number} merges performed
  */
@@ -70,7 +70,7 @@ function processMerges(softWorld, onMerge, isActive) {
       growFrom: 0.55,
       growthSeconds: 0.28,
     });
-    if (onMerge) onMerge(sp.baseScore, sp.fromLevel, sp.x, sp.y);
+    if (onMerge) onMerge(sp.level, sp.fromLevel, sp.x, sp.y);
   }
   return merges;
 }

@@ -15,6 +15,8 @@ var drawFruit = fruits.drawFruit;
 var drawSoftFruit = fruits.drawSoftFruit;
 var randomDropLevel = fruits.randomDropLevel;
 var preloadFruitImages = fruits.preloadFruitImages;
+var FRUITS = fruits.FRUITS;
+var TOP_LEVEL = FRUITS.length - 1;
 var LOGICAL_W = physics.LOGICAL_W;
 var LOGICAL_H = physics.LOGICAL_H;
 var FAIL_LINE_Y = physics.FAIL_LINE_Y;
@@ -194,9 +196,9 @@ function Game() {
 
   // Layout rects (filled by _layout)
   this.topPad = 0;
-  this.scoresY = 0;
   this.nextPreview = { x: 0, y: 0 };
   this.HUD_H = 128;
+  this.melonHud = { x: 12, cy: 24, iconR: 15 };
   this.playScale = 1;
   this.playOffsetX = 0;
   this.playOffsetY = this.HUD_H;
@@ -248,88 +250,45 @@ Game.prototype.start = function () {
 
 /**
  * Capsule-safe HUD layout:
- * Row 1 (below capsule): 得分 | 最高 | 能量 left; 下一个 left of capsule
- * Row 2: ◀ ▶ + 投放 + 重新开始 (larger tap targets, more spacing)
+ * Left: watermelon icon + ×N (this run)
+ * Right: 重新开始 only (left of WeChat capsule)
  */
 Game.prototype._layout = function () {
   var mb = this.menuButton;
   var safeTop = this.safeTop || 0;
-  var topPad = mb ? mb.bottom + 12 : safeTop + 28;
-  this.topPad = topPad;
-  this.scoresY = topPad;
-
-  var pad = 10;
-  var btnH = 40;
+  var pad = 12;
+  var btnH = 36;
   var restartW = 78;
-  var dropW = 68;
-  var softenW = 68;
-  var nudgeW = 36;
-  var gap = 6;
-  var row1H = 44;
-  var btnY = topPad + row1H + 12;
 
-  // Next preview: left of capsule at vertical center when space allows
-  var previewR = 16;
-  var nextX;
-  var nextY;
-  if (mb && mb.left - previewR - 10 > pad + 210) {
-    nextX = mb.left - 34;
-    nextY = mb.top + mb.height / 2;
-  } else {
-    // Sit on row1 right of energy columns, clear of capsule
-    nextX = mb ? Math.min(mb.left - 34, this.screenW - 40) : this.screenW - 48;
-    nextY = topPad + 22;
-    if (nextY + previewR + 8 > btnY) {
-      btnY = nextY + previewR + 14;
-    }
-  }
-  this.nextPreview = { x: nextX, y: nextY, r: previewR };
+  // Align controls with capsule row when available
+  var rowY = mb ? mb.top + (mb.height - btnH) / 2 : safeTop + 10;
+  if (rowY < safeTop + 4) rowY = safeTop + 4;
+  this.topPad = rowY;
 
-  this.energyMaxX = mb ? mb.left - 8 : this.screenW - 8;
-  this.scoresMaxX = this.energyMaxX;
-
-  var right = this.screenW - pad;
+  var rightEdge = mb ? mb.left - 10 : this.screenW - pad;
   this.hitRestart = {
-    x: right - restartW,
-    y: btnY,
+    x: Math.max(pad, rightEdge - restartW),
+    y: rowY,
     w: restartW,
     h: btnH,
   };
-  this.hitDrop = {
-    x: this.hitRestart.x - dropW - gap,
-    y: btnY,
-    w: dropW,
-    h: btnH,
-  };
-  this.hitSoften = {
-    x: this.hitDrop.x - softenW - gap,
-    y: btnY,
-    w: softenW,
-    h: btnH,
+
+  // Melon counter sits on the left of the same row
+  this.melonHud = {
+    x: pad,
+    cy: rowY + btnH / 2,
+    iconR: 15,
   };
 
-  // Compact nudge arrows left of soften when space allows
-  var nudgeRight = this.hitSoften.x - gap;
-  var nudgePairW = nudgeW * 2 + 6;
-  if (nudgeRight - nudgePairW >= pad) {
-    this.hitNudgeL = {
-      x: nudgeRight - nudgePairW,
-      y: btnY,
-      w: nudgeW,
-      h: btnH,
-    };
-    this.hitNudgeR = {
-      x: this.hitNudgeL.x + nudgeW + 6,
-      y: btnY,
-      w: nudgeW,
-      h: btnH,
-    };
-  } else {
-    this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
-    this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
-  }
+  // Hide unused controls (soften kept in code, not in UI)
+  this.hitDrop = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitSoften = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
+  this.nextPreview = { x: 0, y: 0, r: 0 };
 
-  this.HUD_H = btnY + btnH + 16;
+  var bottomOfRow = Math.max(mb ? mb.bottom : 0, rowY + btnH);
+  this.HUD_H = bottomOfRow + 12;
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -340,7 +299,6 @@ Game.prototype._layout = function () {
   this.playOffsetX = (availW - LOGICAL_W * fit) / 2;
   this.playOffsetY = hudH + Math.max(0, (availH - LOGICAL_H * fit) / 2);
 };
-
 
 Game.prototype._drainTouchQueue = function () {
   var g = typeof GameGlobal !== 'undefined' ? GameGlobal : (typeof globalThis !== 'undefined' ? globalThis : null);
@@ -384,12 +342,6 @@ Game.prototype._touchXY = function (e, fromChanged) {
     y = y / this.pixelRatio;
   }
   return { x: x, y: y };
-};
-
-Game.prototype._nudgeAim = function (dir) {
-  if (this.gameOver || !this.canDrop) return;
-  var step = 28;
-  this.aimX = this._clampAimX(this.aimX + dir * step);
 };
 
 Game.prototype._bindTouch = function () {
@@ -491,34 +443,12 @@ Game.prototype._onTouchStart = function (sx, sy) {
     this._restart();
     return;
   }
-  if (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) {
-    if (!this.gameOver && this.canDrop) {
-      this._dropFruit();
-    }
-    this.pointerMode = 'idle';
-    this.aiming = false;
-    return;
-  }
-  if (this.hitSoften.w > 0 && this._hitRect(this.hitSoften, sx, sy)) {
-    this._activateSoften();
-    this.pointerMode = 'idle';
-    this.aiming = false;
-    return;
-  }
-  if (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) {
-    this._nudgeAim(-1);
-    return;
-  }
-  if (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy)) {
-    this._nudgeAim(1);
-    return;
-  }
 
   if (this.gameOver || !this.canDrop) {
     return;
   }
 
-  // 非按钮区（含 HUD 空隙与玩法区）：开始瞄准；x→aimX
+  // 非按钮区：拖动瞄准；松手投放
   var p = this._toLogical(sx, sy);
   this.pointerMode = 'aiming';
   this.aiming = true;
@@ -527,14 +457,8 @@ Game.prototype._onTouchStart = function (sx, sy) {
 
 Game.prototype._onTouchMove = function (sx, sy) {
   if (this.pointerMode !== 'aiming' || this.gameOver) return;
-  // 命中 restart / drop / nudge 时取消瞄准
-  if (
-    this._hitRect(this.hitRestart, sx, sy) ||
-    (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) ||
-    (this.hitSoften.w > 0 && this._hitRect(this.hitSoften, sx, sy)) ||
-    (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) ||
-    (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy))
-  ) {
+  // 命中「重新开始」时取消瞄准
+  if (this._hitRect(this.hitRestart, sx, sy)) {
     this.pointerMode = 'cancelled';
     this.aiming = false;
     return;
@@ -556,7 +480,6 @@ Game.prototype._dropFruit = function () {
   if (!this.canDrop || this.gameOver) return;
   if (this.softWorld.bodies.length >= MAX_BODIES) return;
   this.canDrop = false;
-  this.scoreMgr.resetChain();
 
   var x = this._clampAimX(this.aimX);
   var def = getFruit(this.pendingLevel);
@@ -632,15 +555,18 @@ Game.prototype._update = function (dt) {
   var self = this;
   processMerges(
     this.softWorld,
-    function (baseScore, _level, x, y) {
-      var gained = self.scoreMgr.addMerge(baseScore);
+    function (newLevel, _fromLevel, x, y) {
+      // Soften energy restore kept for later skill reuse (UI hidden)
       self.energy = Math.min(ENERGY_DEFAULT, self.energy + ENERGY_RESTORE_MERGE);
-      self.floatTexts.push({
-        x: x,
-        y: y,
-        text: '+' + gained,
-        life: 700,
-      });
+      if (newLevel === TOP_LEVEL) {
+        self.scoreMgr.addMelon();
+        self.floatTexts.push({
+          x: x,
+          y: y,
+          text: '西瓜 +1',
+          life: 900,
+        });
+      }
     },
     function () {
       return !self.gameOver;
@@ -724,8 +650,7 @@ Game.prototype._render = function () {
 Game.prototype._drawHUD = function (ctx) {
   var sw = this.screenW;
   var hudH = this.HUD_H;
-  var topPad = this.topPad;
-  var mb = this.menuButton;
+  var mh = this.melonHud;
 
   ctx.fillStyle = 'rgba(255, 248, 242, 0.96)';
   ctx.fillRect(0, 0, sw, hudH);
@@ -736,75 +661,22 @@ Game.prototype._drawHUD = function (ctx) {
   ctx.lineTo(sw, hudH - 0.5);
   ctx.stroke();
 
-  var score = this.scoreMgr.score;
-  var high = this.scoreMgr.highScore;
-  var pad = 14;
-  var colGap = 78;
-  var labelY = topPad;
-  var valueY = topPad + 18;
+  // Left: watermelon icon + ×N
+  var defTop = getFruit(TOP_LEVEL);
+  var iconR = mh.iconR;
+  var iconX = mh.x + iconR;
+  var iconY = mh.cy;
+  var iconScale = iconR / defTop.radius;
+  drawFruit(ctx, iconX, iconY, defTop, iconScale, this.fruitImages);
 
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = '#9a6b4f';
-  ctx.font = '12px sans-serif';
-  ctx.fillText('得分', pad, labelY);
-  ctx.fillText('最高', pad + colGap, labelY);
-
-  var energyX = pad + colGap * 2;
-  var energyOk = !mb || energyX + 48 < mb.left - 8;
-  if (energyOk) {
-    ctx.fillText('能量', energyX, labelY);
-  }
-
+  var count = this.scoreMgr.melonCount;
   ctx.fillStyle = '#5a3d2b';
   ctx.font = 'bold 22px sans-serif';
-  ctx.fillText(String(score), pad, valueY);
-  ctx.fillText(String(high), pad + colGap, valueY);
-  if (energyOk) {
-    ctx.fillText(String(this.energy), energyX, valueY);
-  }
-
-  // Next preview (capsule-safe)
-  var np = this.nextPreview;
-  ctx.fillStyle = '#9a6b4f';
-  ctx.font = '11px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('下一个', np.x, np.y - np.r - 2);
-  var def = getFruit(this.nextLevel);
-  var previewScale = Math.min(1, np.r / def.radius);
-  drawFruit(ctx, np.x, np.y, def, previewScale, this.fruitImages);
-
-  if (this.hitNudgeL.w > 0) {
-    this._drawButton(ctx, this.hitNudgeL, '◀', false);
-    this._drawButton(ctx, this.hitNudgeR, '▶', false);
-  }
-  var softenBusy = this.softenRemaining > 0.05;
-  var softenDisabled = this.gameOver || this.energy < SOFTEN_COST || softenBusy;
-  this._drawButton(
-    ctx,
-    this.hitSoften,
-    softenBusy ? '揉软中' : '揉软',
-    softenDisabled
-  );
-  this._drawPrimaryButton(ctx, this.hitDrop, '投放');
-  this._drawButton(ctx, this.hitRestart, '重新开始', false);
-};
-
-Game.prototype._drawPrimaryButton = function (ctx, r, label) {
-  var radius = 8;
-  ctx.beginPath();
-  this._roundRectPath(ctx, r.x, r.y, r.w, r.h, radius);
-  ctx.fillStyle = '#2ecc71';
-  ctx.fill();
-  ctx.strokeStyle = '#27ae60';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 15px sans-serif';
-  ctx.textAlign = 'center';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+  ctx.fillText('× ' + count, iconX + iconR + 8, iconY + 1);
+
+  this._drawButton(ctx, this.hitRestart, '重新开始', false);
 };
 
 Game.prototype._drawButton = function (ctx, r, label, disabled) {
@@ -875,7 +747,7 @@ Game.prototype._drawPlayfield = function (ctx) {
     ctx.fillStyle = '#5a3d2b';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('拖动瞄准 · 松手投放', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
+    ctx.fillText('拖动瞄准，松手投放', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
     ctx.globalAlpha = 1;
   }
 
@@ -894,7 +766,7 @@ Game.prototype._drawPlayfield = function (ctx) {
 
   for (var k = 0; k < this.floatTexts.length; k++) {
     var ft = this.floatTexts[k];
-    ctx.globalAlpha = Math.max(0, ft.life / 700);
+    ctx.globalAlpha = Math.max(0, Math.min(1, ft.life / 900));
     ctx.fillStyle = '#e85d04';
     ctx.font = 'bold 18px sans-serif';
     ctx.textAlign = 'center';
@@ -937,8 +809,8 @@ Game.prototype._drawGameOverOverlay = function (ctx) {
 
   ctx.font = '15px sans-serif';
   ctx.fillStyle = '#7a5a45';
-  ctx.fillText('本次得分：' + this.scoreMgr.score, sw / 2, cy + 78);
-  ctx.fillText('最高纪录：' + this.scoreMgr.highScore, sw / 2, cy + 104);
+  ctx.fillText('本局西瓜：' + this.scoreMgr.melonCount, sw / 2, cy + 78);
+  ctx.fillText('历史最佳：' + this.scoreMgr.melonHigh, sw / 2, cy + 104);
 
   var btnW = 140;
   var btnH = 40;

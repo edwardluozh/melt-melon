@@ -13,11 +13,11 @@
 
 ## 玩法
 
-- 手指左右拖动瞄准，松手投放；或点「投放」
-- 相同水果接触合成下一级，连消加分；合成回复少量能量
-- 「揉软」消耗能量，约 2.4s 内水果更软、可挤过缝隙
+- 手指左右拖动瞄准，松手投放
+- 相同水果接触合成下一级；合成出最高级「西瓜角」时本局西瓜数 +1
+- 顶部 HUD：左侧西瓜图标 + 本局数量；右侧仅「重新开始」
 - 水果质心在危险线上方静止约 3 秒则游戏结束
-- 最高分键名：`melt-melon-highscore`（`wx.getStorageSync` / `setStorageSync`）
+- 历史最佳西瓜数键名：`melt-melon-melon-high`（结算页展示；`wx.getStorageSync` / `setStorageSync`）
 
 ## 目录说明
 
@@ -31,10 +31,9 @@ wechatgame/
     physics.js                 # 场地常量 + SoftWorld 工厂
     fruits.js                  # 水果阶梯 / 精灵 / 软体裁剪绘制
     merge.js                   # SoftWorld contacts 合成
-    score.js
+    score.js                   # 本局 / 历史西瓜计数
     game-core.js               # 主 Game（Canvas + 触摸）
     matter.min.js              # 未使用（可删）
-  _ref_softworld_extract.js    # 参考摘录，勿 require
   README.md
 ```
 
