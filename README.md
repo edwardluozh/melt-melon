@@ -21,8 +21,9 @@
 - Vite + TypeScript + HTML Canvas
 - Matter.js 刚体物理
 
-## 微信小游戏（后续）
-当前为浏览器本地版。迁移时需适配微信 Canvas/触摸 API，并替换存储接口。
+## 微信小游戏
+可导入工程见目录 [`wechatgame/`](./wechatgame/)（含 `project.config.json` + `game.json`）。
+用微信开发者工具打开该目录即可预览；说明见 [`wechatgame/README.md`](./wechatgame/README.md)。
 「揉软一下」软体效果为 M2，当前按钮为占位（禁用）。
 
 ## 仓库

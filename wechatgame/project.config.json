@@ -1,0 +1,16 @@
+{
+  "description": "软西瓜 M1",
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "setting": {
+    "es6": true,
+    "minified": false
+  },
+  "compileType": "game",
+  "libVersion": "3.5.5",
+  "appid": "touristappid",
+  "projectname": "melt-melon",
+  "condition": {}
+}

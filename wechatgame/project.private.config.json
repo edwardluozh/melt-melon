@@ -1,0 +1,7 @@
+{
+  "description": "本地私有配置，可覆盖 project.config.json",
+  "projectname": "melt-melon",
+  "setting": {
+    "urlCheck": false
+  }
+}

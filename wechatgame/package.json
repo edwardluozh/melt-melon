@@ -1,0 +1,6 @@
+{
+  "name": "melt-melon-wechatgame",
+  "private": true,
+  "type": "commonjs",
+  "description": "微信小游戏工程标记为 CommonJS，避免继承根目录 type:module"
+}
