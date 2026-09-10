@@ -42,7 +42,7 @@ class SoftWorld {
       restitution: 0.28, liquidRestitution: 0.055, maximumBounceHeightRatio: 0.55,
       minimumRadiusRatio: 0.76, liquidMinimumRadiusRatio: 0.34, impactRadiusAllowance: 0.24,
       floorImpactCompression: 0.52, liquidFloorImpactCompression: 0.82,
-      packingRadiusRatio: 0.90, contactFriction: 0.18, minimumBoundaryAreaRatio: 0.8, restingDrag: 20, restingInternalDamping: 16,
+      packingRadiusRatio: 0.92, contactFriction: 0.10, minimumBoundaryAreaRatio: 0.8, restingDrag: 20, restingInternalDamping: 16,
       impactShapeRate: 4.0, impactThreshold: 80, impactCooldownSeconds: 0.1, impactDecay: 2.8,
       maximumSpeed: 2400,
     };
@@ -80,7 +80,7 @@ class SoftWorld {
       initialRatio, growthSeconds: initialRatio < 1 ? Math.max(options.growthSeconds != null ? options.growthSeconds : 0.35, 0.15) : 0,
       currentRadius: initialRadius, inverseMass: 900 / (r * r),
       edgeLambdas: new Float64Array(pc), bendLambdas: new Float64Array(pc),
-      isSleeping: false, hasSupport: false, hasStableSupport: false, stillSeconds: 0, repairRecoverySeconds: 0, area: 0, targetArea: 0,
+      isSleeping: false, hasSupport: false, hasStableSupport: false, hasFloorSupport: false, stillSeconds: 0, repairRecoverySeconds: 0, area: 0, targetArea: 0,
       shapeImpulseA: 0, shapeImpulseB: 0, impactExcitation: 0, lastImpactSpeed: 0, floorBounceSpeed: 0, bounceX: 0, bounceY: 0,
     };
     this.updateRestShape(body);
@@ -266,7 +266,7 @@ class SoftWorld {
     for (const point of points) {
       minimumX = Math.min(minimumX, point.x); maximumX = Math.max(maximumX, point.x); maximumY = Math.max(maximumY, point.y);
     }
-    if (maximumY >= this.floor - 1.05) { body.hasSupport = true; body.hasStableSupport = true; }
+    if (maximumY >= this.floor - 1.05) { body.hasSupport = true; body.hasStableSupport = true; body.hasFloorSupport = true; }
     if (maximumY > this.floor - 1 && body.frameVelocityY > 0) {
       const contactPoint = points.reduce((lowest, point) => point.y > lowest.y ? point : lowest, points[0]);
       if (this.registerImpact(body, null, 0, -1, body.frameVelocityY, contactPoint.x, this.floor - 1, body.id + ':floor')) {
@@ -444,13 +444,16 @@ class SoftWorld {
     if (normalY > 0.55) source.hasStableSupport = true;
     if (normalY < -0.55) target.hasStableSupport = true;
     if (minimumOverlap <= 0) return true;
-    // Wake perched / side contacts and any sleeping body touching a moving one.
+    // Wake side contacts, perched stacks, and any sleeping body touching a moving one.
+    // Never freeze a fruit that is sitting on another fruit.
     var relSpeed = Math.hypot(source.vx - target.vx, source.vy - target.vy);
-    var shallowSupport = Math.abs(normalY) < 0.55;
+    var shallowSupport = Math.abs(normalY) < 0.72;
+    var perched = Math.abs(source.y - target.y) > Math.min(source.currentRadius, target.currentRadius) * 0.35;
     if (
-      minimumOverlap > 0.35 ||
-      relSpeed > 8 ||
+      minimumOverlap > 0.25 ||
+      relSpeed > 6 ||
       shallowSupport ||
+      perched ||
       (source.isSleeping && !target.isSleeping) ||
       (target.isSleeping && !source.isSleeping)
     ) {
@@ -550,16 +553,16 @@ class SoftWorld {
       var restingDragMul = 1;
       var sleepStillNeed = 0.65;
       // Adaptive quality: keep full jelly feel for few fruits; throttle when crowded
-      if (bodyCount >= 16) {
+      if (bodyCount >= 18) {
         maxSub = 1;
         solverPasses = 1;
-        restingDragMul = 2.0;
-        sleepStillNeed = 0.38;
-      } else if (bodyCount >= 10) {
+        restingDragMul = 1.35;
+        sleepStillNeed = 0.55;
+      } else if (bodyCount >= 12) {
         maxSub = 1;
         solverPasses = 2;
-        restingDragMul = 1.4;
-        sleepStillNeed = 0.48;
+        restingDragMul = 1.15;
+        sleepStillNeed = 0.6;
       }
       this._solverPasses = solverPasses;
       var substeps = 0;
@@ -580,6 +583,7 @@ class SoftWorld {
         body.age += FIXED_STEP;
         body.hasSupport = false;
         body.hasStableSupport = false;
+        body.hasFloorSupport = false;
         body.impactExcitation *= Math.exp(-(this.parameters.impactDecay + liquid * (5.5 - this.parameters.impactDecay)) * FIXED_STEP);
         body.floorBounceSpeed = 0; body.bounceX = 0; body.bounceY = 0;
         body.isPlacementRepair = false;
@@ -613,10 +617,17 @@ class SoftWorld {
               if (dxc * dxc + dyc * dyc > far * far) continue;
             }
             const key = first.id + ':' + second.id;
-            // Early-out: both sleeping — keep prior contact, skip expensive collide
+            // Early-out: both sleeping on floor pile — keep prior contact.
+            // If clearly stacked (one above the other), still collide/wake.
             if (first.isSleeping && second.isSleeping) {
-              if (previousContacts.has(key)) this.contacts.set(key, [first, second]);
-              continue;
+              var stackDy = Math.abs(first.y - second.y);
+              var stackThresh = Math.min(first.currentRadius || first.r || 20, second.currentRadius || second.r || 20) * 0.4;
+              if (stackDy <= stackThresh) {
+                if (previousContacts.has(key)) this.contacts.set(key, [first, second]);
+                continue;
+              }
+              this.wake(first);
+              this.wake(second);
             }
             // One sleeping + far centers: skip (AABB already passed but center far)
             if ((first.isSleeping || second.isSleeping) && first.bound && second.bound) {
@@ -668,7 +679,7 @@ class SoftWorld {
           body.shapeImpulseA = 0; body.shapeImpulseB = 0;
         }
         // Let visible impact oscillations finish, then damp tiny supported motion.
-        const isSettling = body.hasSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 40;
+        const isSettling = body.hasFloorSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 40;
         if (isSettling) {
           const retention = Math.exp(-this.parameters.restingDrag * restingDragMul * FIXED_STEP);
           const shiftX = body.vx * (retention - 1), shiftY = body.vy * (retention - 1);
@@ -685,7 +696,7 @@ class SoftWorld {
         }
         this.updateGeometry(body);
         if (body.area < body.targetArea * .75) this.restoreMinimumArea(body);
-        if (body.age > body.growthSeconds + 0.5 && body.hasStableSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / body.points.length < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
+        if (body.age > body.growthSeconds + 0.5 && body.hasFloorSupport && body.hasStableSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / body.points.length < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
         else body.stillSeconds = 0;
         if (body.stillSeconds > sleepStillNeed) {
           body.isSleeping = true; body.vx = 0; body.vy = 0;
