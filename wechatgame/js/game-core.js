@@ -315,8 +315,9 @@ Game.prototype.start = function () {
 
 /**
  * Capsule-safe HUD layout:
- * Left: watermelon icon + ×N (this run)
- * Right: 重新开始 only (left of WeChat capsule)
+ * Left: watermelon icon + ×N
+ * Right: 重新开始
+ * Both sit BELOW the WeChat capsule (not side-by-side with it).
  */
 Game.prototype._layout = function () {
   var mb = this.menuButton;
@@ -324,24 +325,32 @@ Game.prototype._layout = function () {
   var pad = 12;
   var restartW = 78;
   var iconR = 14;
-  var gap = 8;
+  var gapBelowCapsule = 8;
+  var btnH = 32;
 
-  // Align melon icon + 重新开始 to WeChat capsule geometry
-  var btnH = mb && mb.height > 0 ? mb.height : 32;
-  var btnY = mb && mb.top != null ? mb.top : Math.max(safeTop, 0) + 4;
+  // Prefer capsule bottom; fall back to status/safe area
+  var capsuleBottom = 0;
+  if (mb && mb.bottom > 0) {
+    capsuleBottom = mb.bottom;
+  } else if (safeTop > 0) {
+    capsuleBottom = safeTop + (mb && mb.height > 0 ? mb.height : 32);
+  } else {
+    capsuleBottom = 48;
+  }
+
+  var btnY = capsuleBottom + gapBelowCapsule;
   var melonCy = btnY + btnH / 2;
 
   this.topPad = btnY;
 
-  var rightEdge = mb && mb.left > 0 ? mb.left - gap : this.screenW - pad;
+  // Below capsule: restart can hug the right screen edge
   this.hitRestart = {
-    x: Math.max(pad + 80, rightEdge - restartW),
+    x: Math.max(pad + 80, this.screenW - pad - restartW),
     y: btnY,
     w: restartW,
     h: btnH,
   };
 
-  // Left: whole watermelon icon + ×N (vertically centered on capsule)
   this.melonHud = {
     x: pad,
     cy: melonCy,
@@ -355,12 +364,7 @@ Game.prototype._layout = function () {
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.nextPreview = { x: 0, y: 0, r: 0 };
 
-  // HUD bottom: menuButton.bottom + 10 (or safeTop fallback)
-  if (mb && mb.bottom > 0) {
-    this.HUD_H = mb.bottom + 10;
-  } else {
-    this.HUD_H = Math.max(safeTop + btnH + 10, btnY + btnH + 10);
-  }
+  this.HUD_H = btnY + btnH + 10;
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -757,7 +761,7 @@ Game.prototype._drawHUD = function (ctx) {
   ctx.font = 'bold 22px sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('× ' + count, iconX + iconR + 8, iconY + 1);
+  ctx.fillText('× ' + count, iconX + iconR + 8, iconY);
 
   this._drawButton(ctx, this.hitRestart, '重新开始', false);
 };
