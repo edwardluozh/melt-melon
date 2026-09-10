@@ -155,7 +155,9 @@ function preloadFruitImages(onDone) {
 
 
 /**
- * Draw soft-body fruit: clip to membrane polygon, paint sprite over AABB.
+ * Draw soft-body fruit with anti-aliased elliptical silhouette (no faceted 14-gon clip).
+ * Uses AABB half-extents as rx/ry, then scale + circle drawFruit. Polygon clip only
+ * when extremely deformed (optional path).
  * @param {CanvasRenderingContext2D} ctx
  * @param {object} body SoftWorld body with points[], x, y, minX..maxY, currentRadius, level
  * @param {object} def fruit def
@@ -178,36 +180,37 @@ function drawSoftFruit(ctx, body, def, images) {
       if (p.y > maxY) maxY = p.y;
     }
   }
-  var pad = 1;
-  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
-  var w = Math.max(2, maxX - minX);
-  var h = Math.max(2, maxY - minY);
   var cx = body.x != null ? body.x : (minX + maxX) * 0.5;
   var cy = body.y != null ? body.y : (minY + maxY) * 0.5;
-  var img = images && def.sprite ? images[def.sprite] : null;
+  var rx = Math.max(1, (maxX - minX) * 0.5);
+  var ry = Math.max(1, (maxY - minY) * 0.5);
+  var r = body.currentRadius || def.radius || Math.max(rx, ry);
+  if (!(r > 0)) r = 1;
 
-  // Sleeping: still clip once, but use currentRadius square (cheaper AABB side)
-  var sleeping = !!body.isSleeping;
-  var side = sleeping
-    ? Math.max(2, (body.currentRadius || def.radius) * 2.05)
-    : Math.max(w, h);
+  // Extreme deformation: aspect or AABB vs rest radius far off → optional polygon clip
+  var aspect = rx > ry ? rx / ry : ry / rx;
+  var extent = Math.max(rx, ry);
+  var extreme = aspect > 1.55 || extent > r * 1.45 || extent < r * 0.55;
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y);
-  for (var j = 1; j < points.length; j++) {
-    ctx.lineTo(points[j].x, points[j].y);
+  ctx.imageSmoothingEnabled = true;
+  if (typeof ctx.imageSmoothingQuality === 'string') {
+    ctx.imageSmoothingQuality = 'high';
   }
-  ctx.closePath();
-  ctx.clip();
 
-  if (img && img.width > 0 && img.height > 0) {
-    ctx.drawImage(img, cx - side * 0.5, cy - side * 0.5, side, side);
-  } else {
-    var r = body.currentRadius || def.radius;
-    if (sleeping) {
-      ctx.fillStyle = def.color;
-      ctx.fill();
+  if (extreme) {
+    var pad = 1;
+    var side = Math.max(2, Math.max(maxX - minX, maxY - minY) + pad * 2);
+    var img = images && def.sprite ? images[def.sprite] : null;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (var j = 1; j < points.length; j++) {
+      ctx.lineTo(points[j].x, points[j].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+    if (img && img.width > 0 && img.height > 0) {
+      ctx.drawImage(img, cx - side * 0.5, cy - side * 0.5, side, side);
     } else {
       var grd = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
       grd.addColorStop(0, '#ffffffcc');
@@ -215,15 +218,16 @@ function drawSoftFruit(ctx, body, def, images) {
       grd.addColorStop(1, def.stroke);
       ctx.fillStyle = grd;
       ctx.fill();
-      ctx.lineWidth = Math.max(1.5, r * 0.06);
-      ctx.strokeStyle = def.stroke;
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (var k = 1; k < points.length; k++) ctx.lineTo(points[k].x, points[k].y);
-      ctx.closePath();
-      ctx.stroke();
     }
+    ctx.restore();
+    return;
   }
+
+  // Default: smooth elliptical transform + circle sprite (anti-aliased)
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(rx / r, ry / r);
+  drawFruit(ctx, 0, 0, def, 1, images);
   ctx.restore();
 }
 

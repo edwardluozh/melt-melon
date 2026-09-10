@@ -94,7 +94,7 @@ function readSystemMetrics(canvas) {
   var safeBottom = 0;
   var menuButton = readMenuButton();
 
-  // 1) getWindowInfo if available (no legacy bridge spam)
+  // Prefer wx.getWindowInfo() (windowWidth/Height/statusBarHeight/safeArea)
   var win = readWindowInfoSafe();
   if (win) {
     if (win.pixelRatio > 0) pixelRatio = win.pixelRatio;
@@ -105,8 +105,9 @@ function readSystemMetrics(canvas) {
     } else if (typeof win.statusBarHeight === 'number') {
       safeTop = Math.max(0, win.statusBarHeight);
     }
-    if (win.safeArea && typeof win.safeArea.bottom === 'number' && win.screenHeight > 0) {
-      safeBottom = Math.max(0, win.screenHeight - win.safeArea.bottom);
+    if (win.safeArea && typeof win.safeArea.bottom === 'number') {
+      var shRef = win.screenHeight > 0 ? win.screenHeight : (win.windowHeight || 0);
+      if (shRef > 0) safeBottom = Math.max(0, shRef - win.safeArea.bottom);
     }
   }
 
@@ -117,20 +118,33 @@ function readSystemMetrics(canvas) {
     safeTop = Math.max(0, menuButton.top);
   }
 
-  // 3) Prefer canvas buffer size when system info was zero / missing
+  // After createCanvas: if buffer already equals physical pixels, keep CSS from windowInfo
+  // (do not wrongly treat canvas.width as CSS pixels).
   if (canvas) {
     var cw = canvas.width || 0;
     var ch = canvas.height || 0;
-    if ((!screenW || screenW <= 0) && cw > 0) {
-      screenW = Math.round(cw / pixelRatio) || cw;
-    }
-    if ((!screenH || screenH <= 0) && ch > 0) {
-      screenH = Math.round(ch / pixelRatio) || ch;
-    }
-    if (cw > 0 && ch > 0 && (screenW <= 0 || screenH <= 0)) {
-      screenW = cw;
-      screenH = ch;
-      pixelRatio = 1;
+    if (win && win.windowWidth > 0 && win.windowHeight > 0) {
+      screenW = win.windowWidth;
+      screenH = win.windowHeight;
+      // If canvas already matches physical size (window * dpr), trust windowInfo CSS sizes
+      var expectW = Math.round(win.windowWidth * pixelRatio);
+      var expectH = Math.round(win.windowHeight * pixelRatio);
+      if (cw > 0 && ch > 0 && Math.abs(cw - expectW) <= 2 && Math.abs(ch - expectH) <= 2) {
+        // canvas is physical; screenW/H already CSS from windowInfo — leave as-is
+      }
+    } else {
+      // No windowInfo: only then derive CSS from canvas / dpr
+      if ((!screenW || screenW <= 0) && cw > 0) {
+        screenW = Math.round(cw / pixelRatio) || cw;
+      }
+      if ((!screenH || screenH <= 0) && ch > 0) {
+        screenH = Math.round(ch / pixelRatio) || ch;
+      }
+      if (cw > 0 && ch > 0 && (screenW <= 0 || screenH <= 0)) {
+        screenW = cw;
+        screenH = ch;
+        pixelRatio = 1;
+      }
     }
   }
 
@@ -212,8 +226,10 @@ function Game() {
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.hitOverlayRestart = { x: 0, y: 0, w: 0, h: 0 };
 
+  this._metricsRefreshLeft = 3; // re-read menuButton on first frames (late-ready on device)
   this._layout();
   this._bindTouch();
+  this._bindLifecycle();
   this._preloadImages();
 }
 
@@ -221,6 +237,52 @@ Game.prototype._preloadImages = function () {
   var self = this;
   preloadFruitImages(function (map) {
     self.fruitImages = map || {};
+  });
+};
+
+/** Re-read menuButton / window metrics and re-layout (real devices may be late-ready). */
+Game.prototype._refreshMetrics = function () {
+  var metrics = readSystemMetrics(this.canvas);
+  var changed =
+    metrics.screenW !== this.screenW ||
+    metrics.screenH !== this.screenH ||
+    metrics.pixelRatio !== this.pixelRatio ||
+    metrics.safeTop !== this.safeTop ||
+    metrics.safeBottom !== this.safeBottom;
+  var mb = metrics.menuButton;
+  var mb0 = this.menuButton;
+  if (!changed) {
+    if (!mb && !mb0) {
+      /* same */
+    } else if (!mb || !mb0) {
+      changed = true;
+    } else if (
+      mb.left !== mb0.left ||
+      mb.top !== mb0.top ||
+      mb.width !== mb0.width ||
+      mb.height !== mb0.height
+    ) {
+      changed = true;
+    }
+  }
+  if (!changed) return false;
+  this.pixelRatio = metrics.pixelRatio;
+  this.screenW = metrics.screenW;
+  this.screenH = metrics.screenH;
+  this.safeTop = metrics.safeTop;
+  this.safeBottom = metrics.safeBottom;
+  this.menuButton = metrics.menuButton;
+  this.canvas.width = Math.max(1, Math.floor(this.screenW * this.pixelRatio));
+  this.canvas.height = Math.max(1, Math.floor(this.screenH * this.pixelRatio));
+  this._layout();
+  return true;
+};
+
+Game.prototype._bindLifecycle = function () {
+  var self = this;
+  if (typeof wx === 'undefined' || typeof wx.onShow !== 'function') return;
+  wx.onShow(function () {
+    self._refreshMetrics();
   });
 };
 
@@ -260,37 +322,29 @@ Game.prototype._layout = function () {
   var mb = this.menuButton;
   var safeTop = this.safeTop || 0;
   var pad = 12;
-  var btnH = 32;
   var restartW = 78;
   var iconR = 14;
+  var gap = 8;
 
-  // Top reserved by status bar + WeChat capsule
-  var capsuleTop = mb ? mb.top : safeTop;
-  var capsuleBottom = mb ? mb.bottom : safeTop + 32;
-  var capsuleH = Math.max(mb ? mb.height : 32, 28);
-  var bandTop = Math.max(safeTop, Math.min(capsuleTop, safeTop + 4));
-  // Band between status/capsule and playfield: enough room under capsule
-  var bandBottom = Math.max(capsuleBottom, bandTop + capsuleH) + 10;
-  if (bandBottom - bandTop < btnH + 16) bandBottom = bandTop + btnH + 16;
+  // Align melon icon + 重新开始 to WeChat capsule geometry
+  var btnH = mb && mb.height > 0 ? mb.height : 32;
+  var btnY = mb && mb.top != null ? mb.top : Math.max(safeTop, 0) + 4;
+  var melonCy = btnY + btnH / 2;
 
-  // Vertically center melon row + restart in that band
-  var bandMid = (bandTop + bandBottom) / 2;
-  var rowY = bandMid - btnH / 2;
-  if (rowY < bandTop + 2) rowY = bandTop + 2;
-  this.topPad = rowY;
+  this.topPad = btnY;
 
-  var rightEdge = mb ? mb.left - 8 : this.screenW - pad;
+  var rightEdge = mb && mb.left > 0 ? mb.left - gap : this.screenW - pad;
   this.hitRestart = {
     x: Math.max(pad + 80, rightEdge - restartW),
-    y: rowY,
+    y: btnY,
     w: restartW,
     h: btnH,
   };
 
-  // Left: whole watermelon icon + ×N (same vertical center as restart)
+  // Left: whole watermelon icon + ×N (vertically centered on capsule)
   this.melonHud = {
     x: pad,
-    cy: rowY + btnH / 2,
+    cy: melonCy,
     iconR: iconR,
   };
 
@@ -301,7 +355,12 @@ Game.prototype._layout = function () {
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.nextPreview = { x: 0, y: 0, r: 0 };
 
-  this.HUD_H = Math.max(bandBottom, rowY + btnH + 8);
+  // HUD bottom: menuButton.bottom + 10 (or safeTop fallback)
+  if (mb && mb.bottom > 0) {
+    this.HUD_H = mb.bottom + 10;
+  } else {
+    this.HUD_H = Math.max(safeTop + btnH + 10, btnY + btnH + 10);
+  }
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -549,6 +608,11 @@ Game.prototype._restart = function () {
 Game.prototype._update = function (dt) {
   this._drainTouchQueue();
 
+  if (this._metricsRefreshLeft > 0) {
+    this._metricsRefreshLeft -= 1;
+    this._refreshMetrics();
+  }
+
   var dtSec = dt / 1000;
   if (this.softenRemaining > 0) {
     this.softenRemaining = Math.max(0, this.softenRemaining - dtSec);
@@ -648,6 +712,12 @@ Game.prototype._render = function () {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, sw, sh);
+
+  // Aiming/pending + soft fruits: anti-aliased circle/ellipse sprites
+  ctx.imageSmoothingEnabled = true;
+  if (typeof ctx.imageSmoothingQuality === 'string') {
+    ctx.imageSmoothingQuality = 'high';
+  }
 
   ctx.fillStyle = '#fff0e8';
   ctx.fillRect(0, 0, sw, sh);
