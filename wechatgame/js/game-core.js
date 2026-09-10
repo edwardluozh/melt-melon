@@ -80,23 +80,7 @@ function readWindowInfoSafe() {
   return null;
 }
 
-function readSystemInfoOnce() {
-  if (neverRetrySysInfo || sysInfoTried) return sysInfoCached;
-  sysInfoTried = true;
-  try {
-    if (typeof wx !== 'undefined' && wx.getSystemInfoSync) {
-      var sys = wx.getSystemInfoSync();
-      if (sys) {
-        sysInfoCached = sys;
-        return sys;
-      }
-    }
-  } catch (e) {
-    neverRetrySysInfo = true;
-    sysInfoCached = null;
-  }
-  return null;
-}
+function readSystemInfoOnce() { return null; }
 
 /**
  * Prefer canvas size + menuButton + getWindowInfo; getSystemInfoSync only once.
@@ -125,24 +109,7 @@ function readSystemMetrics(canvas) {
     }
   }
 
-  // 2) Optional one-shot getSystemInfoSync only if still missing metrics
-  if ((!screenW || !screenH) && !neverRetrySysInfo) {
-    var sys = readSystemInfoOnce();
-    if (sys) {
-      if (sys.pixelRatio > 0) pixelRatio = sys.pixelRatio;
-      if (sys.windowWidth > 0) screenW = sys.windowWidth;
-      if (sys.windowHeight > 0) screenH = sys.windowHeight;
-      else if (sys.screenHeight > 0) screenH = sys.screenHeight;
-      if (sys.safeArea && typeof sys.safeArea.top === 'number') {
-        safeTop = Math.max(0, sys.safeArea.top);
-      } else if (typeof sys.statusBarHeight === 'number') {
-        safeTop = Math.max(0, sys.statusBarHeight);
-      }
-      if (sys.safeArea && typeof sys.safeArea.bottom === 'number' && sys.screenHeight > 0) {
-        safeBottom = Math.max(0, sys.screenHeight - sys.safeArea.bottom);
-      }
-    }
-  }
+  // getSystemInfoSync 已禁用：模拟器常抛 jsbridge not ready
 
   // Infer safeTop from menu button when status bar unknown
   if (safeTop <= 0 && menuButton && menuButton.top > 0) {
@@ -423,37 +390,99 @@ Game.prototype._bindJelly = function () {
   });
 };
 
+Game.prototype._touchXY = function (e, fromChanged) {
+  var list = fromChanged
+    ? e.changedTouches || e.touches
+    : e.touches || e.changedTouches;
+  var t = list && list[0];
+  if (!t) return null;
+  // 微信小游戏优先用 x/y；模拟器鼠标也可能给 clientX
+  var x = t.x != null ? t.x : t.clientX;
+  var y = t.y != null ? t.y : t.clientY;
+  if (x == null || y == null) return null;
+  // 若坐标像物理像素，缩回 CSS 像素
+  if (this.pixelRatio > 1.1 && x > this.screenW * 1.25) {
+    x = x / this.pixelRatio;
+    y = y / this.pixelRatio;
+  }
+  return { x: x, y: y };
+};
+
 Game.prototype._bindTouch = function () {
   var self = this;
 
-  wx.onTouchStart(function (e) {
-    var t = e.touches && e.touches[0];
-    if (!t) return;
-    var x = t.clientX != null ? t.clientX : t.x;
-    var y = t.clientY != null ? t.clientY : t.y;
-    self._onTouchStart(x, y);
-  });
-
-  wx.onTouchMove(function (e) {
-    var t = e.touches && e.touches[0];
-    if (!t) return;
-    var x = t.clientX != null ? t.clientX : t.x;
-    var y = t.clientY != null ? t.clientY : t.y;
-    self._onTouchMove(x, y);
-  });
-
-  wx.onTouchEnd(function () {
+  function onStart(e) {
+    var p = self._touchXY(e, false);
+    if (!p) return;
+    self._onTouchStart(p.x, p.y);
+  }
+  function onMove(e) {
+    var p = self._touchXY(e, false);
+    if (!p) return;
+    self._onTouchMove(p.x, p.y);
+  }
+  function onEnd(e) {
+    // end 时用 changedTouches 更新最后瞄准点
+    var p = self._touchXY(e, true);
+    if (p && self.pointerMode === 'aiming') {
+      self._onTouchMove(p.x, p.y);
+    }
     self._onTouchEnd();
-  });
-
-  wx.onTouchCancel(function () {
+  }
+  function onCancel() {
     self.pointerMode = 'cancelled';
     self.aiming = false;
-  });
+  }
+
+  if (typeof wx !== 'undefined') {
+    if (wx.onTouchStart) wx.onTouchStart(onStart);
+    if (wx.onTouchMove) wx.onTouchMove(onMove);
+    if (wx.onTouchEnd) wx.onTouchEnd(onEnd);
+    if (wx.onTouchCancel) wx.onTouchCancel(onCancel);
+  }
+
+  // 部分运行时也挂在 canvas 上（含开发者工具鼠标）
+  var c = this.canvas;
+  if (c && typeof c.addEventListener === 'function') {
+    c.addEventListener('touchstart', onStart, false);
+    c.addEventListener('touchmove', onMove, false);
+    c.addEventListener('touchend', onEnd, false);
+    c.addEventListener('touchcancel', onCancel, false);
+    c.addEventListener(
+      'mousedown',
+      function (ev) {
+        self._onTouchStart(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+      },
+      false
+    );
+    c.addEventListener(
+      'mousemove',
+      function (ev) {
+        if (self.pointerMode !== 'aiming') return;
+        self._onTouchMove(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+      },
+      false
+    );
+    c.addEventListener(
+      'mouseup',
+      function (ev) {
+        if (self.pointerMode === 'aiming') {
+          self._onTouchMove(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+        }
+        self._onTouchEnd();
+      },
+      false
+    );
+  }
 };
 
 Game.prototype._hitRect = function (r, x, y) {
   return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+};
+
+/** 屏幕坐标是否在可操作投放区（HUD 下方即可，不要求精确落在逻辑矩形内） */
+Game.prototype._inDropZone = function (sx, sy) {
+  return sy >= (this.HUD_H || 0) - 4 && sy <= this.screenH && sx >= 0 && sx <= this.screenW;
 };
 
 Game.prototype._onTouchStart = function (sx, sy) {
@@ -470,8 +499,8 @@ Game.prototype._onTouchStart = function (sx, sy) {
   }
 
   if (this.gameOver || !this.canDrop) return;
+  if (!this._inDropZone(sx, sy)) return;
   var p = this._toLogical(sx, sy);
-  if (!this._inPlayfield(p.x, p.y)) return;
   this.pointerMode = 'aiming';
   this.aiming = true;
   this.aimX = this._clampAimX(p.x);
@@ -479,12 +508,13 @@ Game.prototype._onTouchStart = function (sx, sy) {
 
 Game.prototype._onTouchMove = function (sx, sy) {
   if (this.pointerMode !== 'aiming' || this.gameOver) return;
-  var p = this._toLogical(sx, sy);
-  if (!this._inPlayfield(p.x, p.y)) {
+  // 拖回 HUD 才取消；左右滑出仍保持瞄准
+  if (sy < (this.HUD_H || 0) - 24) {
     this.pointerMode = 'cancelled';
     this.aiming = false;
     return;
   }
+  var p = this._toLogical(sx, sy);
   this.aimX = this._clampAimX(p.x);
 };
 
