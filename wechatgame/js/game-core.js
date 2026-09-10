@@ -225,35 +225,41 @@ Game.prototype._preloadImages = function () {
   });
 };
 
-function scheduleFrame(cb) {
-  if (typeof requestAnimationFrame === 'function') {
-    return requestAnimationFrame(cb);
-  }
-  // 勿再 wx.createCanvas()：第二块 canvas 会干扰小游戏运行时
-  return setTimeout(function () {
-    cb(nowMs());
-  }, 16);
-}
-
 Game.prototype.start = function () {
   if (this.running) return;
   this.running = true;
   this.lastTs = nowMs();
   var self = this;
-  function loop(ts) {
+
+  // 开发者工具里 requestAnimationFrame 经常不回调 → 主循环用 setInterval
+  if (this._loopTimer) {
+    clearInterval(this._loopTimer);
+    this._loopTimer = null;
+  }
+  this._loopTimer = setInterval(function () {
     if (!self.running) return;
-    var t = typeof ts === 'number' ? ts : nowMs();
+    var t = nowMs();
     var dt = Math.min(50, Math.max(0, t - self.lastTs));
+    // 首帧或卡住时给一个稳定步长
+    if (!(dt > 0) || dt > 100) dt = 16;
     self.lastTs = t;
     try {
       self._update(dt);
       self._render();
     } catch (err) {
       console.error('[melt-melon] frame error', err);
+      if (self._debugTouch) {
+        self._debugTouch.mode = 'ERR';
+      }
     }
-    scheduleFrame(loop);
-  }
-  scheduleFrame(loop);
+  }, 16);
+
+  // 启动约 1 秒后自动落一颗，验证循环/物理是否在跑
+  setTimeout(function () {
+    if (!self.running || self.gameOver || !self.canDrop) return;
+    self._dropFruit();
+    if (self._debugTouch) self._debugTouch.mode = 'auto-drop';
+  }, 1000);
 };
 
 /**
@@ -617,11 +623,16 @@ Game.prototype._dropFruit = function () {
 
   var x = this._clampAimX(this.aimX);
   var body = createFruitBody(x, DROP_Y, this.pendingLevel);
-  Matter.Body.setVelocity(body, { x: 0, y: 2 });
+  Matter.Body.setVelocity(body, { x: 0, y: 4 });
   Matter.World.add(this.engine.world, body);
 
   this.pendingLevel = this.nextLevel;
   this.nextLevel = randomDropLevel();
+
+  // 立刻刷新一帧，避免循环未跑时看起来“点了没反应”
+  try {
+    this._render();
+  } catch (e) {}
 
   var self = this;
   setTimeout(function () {
