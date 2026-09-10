@@ -9,18 +9,18 @@ var FRUITS = [
   { level: 3, name: '柠檬', emoji: '🍋', radius: 34, color: '#f7d060', stroke: '#d4a017', score: 8, sprite: 'images/fruit_3.png' },
   { level: 4, name: '猕猴桃', emoji: '🥝', radius: 42, color: '#7bed9f', stroke: '#2ed573', score: 16, sprite: 'images/fruit_4.png' },
   { level: 5, name: '桃', emoji: '🍑', radius: 50, color: '#ff9ff3', stroke: '#f368e0', score: 32, sprite: 'images/fruit_5.png' },
-  { level: 6, name: '西瓜圆', emoji: '🍉', radius: 60, color: '#2ed573', stroke: '#1e9d4b', score: 64, sprite: 'images/fruit_6.png' },
-  { level: 7, name: '西瓜角', emoji: '🍉', radius: 72, color: '#ff4757', stroke: '#c0392b', score: 128, sprite: 'images/fruit_7.png' },
+  { level: 6, name: '半西瓜', emoji: '🍉', radius: 60, color: '#ff4757', stroke: '#c0392b', score: 64, sprite: 'images/fruit_6.png' },
+  { level: 7, name: '完整西瓜', emoji: '🍉', radius: 71, color: '#2ed573', stroke: '#1e9d4b', score: 128, sprite: 'images/fruit_7.png' },
 ];
 
-var DROP_LEVEL_COUNT = 4;
+var DROP_LEVEL_COUNT = 3;
 
 function getFruit(level) {
   return FRUITS[Math.max(0, Math.min(level, FRUITS.length - 1))];
 }
 
-/** 大西瓜（圆，level 6）为最终目标；不再合成西瓜角 */
-var MELON_LEVEL = 6;
+/** 完整西瓜（整颗条纹西瓜，level 7）为最终目标；半西瓜（level 6）为倒数第二阶 */
+var MELON_LEVEL = 7;
 
 function nextLevel(level) {
   if (level >= MELON_LEVEL) return null;
@@ -187,10 +187,10 @@ function drawSoftFruit(ctx, body, def, images) {
   var r = body.currentRadius || def.radius || Math.max(rx, ry);
   if (!(r > 0)) r = 1;
 
-  // Extreme deformation: aspect or AABB vs rest radius far off → optional polygon clip
+  // Extreme deformation only: prefer cheap ellipse draw; avoid per-frame polygon clip
   var aspect = rx > ry ? rx / ry : ry / rx;
   var extent = Math.max(rx, ry);
-  var extreme = aspect > 1.55 || extent > r * 1.45 || extent < r * 0.55;
+  var extreme = aspect > 1.85 || extent > r * 1.65 || extent < r * 0.45;
 
   ctx.imageSmoothingEnabled = true;
   if (typeof ctx.imageSmoothingQuality === 'string') {

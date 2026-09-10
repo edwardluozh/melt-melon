@@ -16,10 +16,10 @@ var drawSoftFruit = fruits.drawSoftFruit;
 var randomDropLevel = fruits.randomDropLevel;
 var preloadFruitImages = fruits.preloadFruitImages;
 var FRUITS = fruits.FRUITS;
-var MELON_LEVEL = fruits.MELON_LEVEL != null ? fruits.MELON_LEVEL : 6;
-var TOP_LEVEL = MELON_LEVEL; // alias: round watermelon is the goal
-/** HUD uses whole round watermelon (fruit_6), not wedge fruit_7 */
-var HUD_MELON_LEVEL = 6;
+var MELON_LEVEL = fruits.MELON_LEVEL != null ? fruits.MELON_LEVEL : 7;
+var TOP_LEVEL = MELON_LEVEL; // alias: whole striped watermelon is the goal
+/** HUD uses whole striped watermelon (fruit_7 / 完整西瓜) */
+var HUD_MELON_LEVEL = 7;
 var LOGICAL_W = physics.LOGICAL_W;
 var LOGICAL_H = physics.LOGICAL_H;
 var FAIL_LINE_Y = physics.FAIL_LINE_Y;
@@ -748,7 +748,7 @@ Game.prototype._drawHUD = function (ctx) {
   ctx.lineTo(sw, hudH - 0.5);
   ctx.stroke();
 
-  // Left: whole round watermelon (fruit_6) + ×N
+  // Left: whole striped watermelon (fruit_7) + ×N
   var defMelon = getFruit(HUD_MELON_LEVEL);
   var iconR = mh.iconR;
   var iconX = mh.x + iconR;

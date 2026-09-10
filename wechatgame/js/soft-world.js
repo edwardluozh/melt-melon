@@ -3,11 +3,20 @@
  * WeChat-friendly: no optional chaining / nullish coalescing.
  */
 var POINT_COUNT = 14;
+var POINT_COUNT_MED = 12;
+var POINT_COUNT_LOW = 10;
 var FIXED_STEP = 1 / 60;
 var MAX_SUBSTEPS = 2;
 var SOLVER_PASSES = 3;
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+/** Adaptive membrane resolution: keep 14 for few bodies, drop when crowded. */
+function choosePointCount(bodyCount) {
+  if (bodyCount >= 16) return POINT_COUNT_LOW;
+  if (bodyCount >= 8) return POINT_COUNT_MED;
+  return POINT_COUNT;
 }
 
 class SoftWorld {
@@ -60,16 +69,17 @@ class SoftWorld {
     y = Math.min(y, this.floor - initialRadius - 1);
     const velocityX = (options.vx != null ? options.vx : 0);
     const velocityY = (options.vy != null ? options.vy : 0);
+    var pc = choosePointCount(this.bodies.length);
     const points = [];
-    for (var pti = 0; pti < POINT_COUNT; pti++) {
-      var angle = pti * Math.PI * 2 / POINT_COUNT;
+    for (var pti = 0; pti < pc; pti++) {
+      var angle = pti * Math.PI * 2 / pc;
       points.push({ x: x + Math.cos(angle) * initialRadius, y: y + Math.sin(angle) * initialRadius, vx: velocityX, vy: velocityY, oldX: 0, oldY: 0 });
     }
     const body = {
       id: this.nextId++, level, r, x, y, stepStartX: x, stepStartY: y, vx: velocityX, vy: velocityY, age: 0, points,
       initialRatio, growthSeconds: initialRatio < 1 ? Math.max(options.growthSeconds != null ? options.growthSeconds : 0.35, 0.15) : 0,
       currentRadius: initialRadius, inverseMass: 900 / (r * r),
-      edgeLambdas: new Float64Array(POINT_COUNT), bendLambdas: new Float64Array(POINT_COUNT),
+      edgeLambdas: new Float64Array(pc), bendLambdas: new Float64Array(pc),
       isSleeping: false, hasSupport: false, hasStableSupport: false, stillSeconds: 0, repairRecoverySeconds: 0, area: 0, targetArea: 0,
       shapeImpulseA: 0, shapeImpulseB: 0, impactExcitation: 0, lastImpactSpeed: 0, floorBounceSpeed: 0, bounceX: 0, bounceY: 0,
     };
@@ -135,23 +145,25 @@ class SoftWorld {
     const progress = body.growthSeconds ? clamp(body.age / body.growthSeconds, 0, 1) : 1;
     const easedProgress = progress * progress * (3 - 2 * progress);
     body.currentRadius = body.r * (body.initialRatio + (1 - body.initialRatio) * easedProgress);
-    body.edgeLength = 2 * body.currentRadius * Math.sin(Math.PI / POINT_COUNT);
-    body.bendLength = 2 * body.currentRadius * Math.sin(2 * Math.PI / POINT_COUNT);
-    body.targetArea = POINT_COUNT * Math.pow(body.currentRadius, 2) * Math.sin(2 * Math.PI / POINT_COUNT) / 2;
+    var n = body.points.length;
+    body.edgeLength = 2 * body.currentRadius * Math.sin(Math.PI / n);
+    body.bendLength = 2 * body.currentRadius * Math.sin(2 * Math.PI / n);
+    body.targetArea = n * Math.pow(body.currentRadius, 2) * Math.sin(2 * Math.PI / n) / 2;
   }
 
   updateGeometry(body) {
     let centerX = 0, centerY = 0, area = 0;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (let index = 0; index < POINT_COUNT; index++) {
+    var n = body.points.length;
+    for (let index = 0; index < n; index++) {
       const point = body.points[index];
-      const next = body.points[(index + 1) % POINT_COUNT];
+      const next = body.points[(index + 1) % n];
       centerX += point.x; centerY += point.y;
       area += point.x * next.y - next.x * point.y;
       minX = Math.min(minX, point.x); minY = Math.min(minY, point.y);
       maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
     }
-    Object.assign(body, { x: centerX / POINT_COUNT, y: centerY / POINT_COUNT, area: area * 0.5, minX, minY, maxX, maxY });
+    Object.assign(body, { x: centerX / n, y: centerY / n, area: area * 0.5, minX, minY, maxX, maxY });
     body.bound = Math.hypot(maxX - minX, maxY - minY) * 0.5 + 2;
   }
 
@@ -171,8 +183,9 @@ class SoftWorld {
   constrainArea(body) {
     let area = 0, gradientSquared = 0;
     const points = body.points;
-    for (let index = 0; index < POINT_COUNT; index++) {
-      const point = points[index], previous = points[(index + POINT_COUNT - 1) % POINT_COUNT], next = points[(index + 1) % POINT_COUNT];
+    var n = points.length;
+    for (let index = 0; index < n; index++) {
+      const point = points[index], previous = points[(index + n - 1) % n], next = points[(index + 1) % n];
       area += point.x * next.y - next.x * point.y;
       point.areaX = (next.y - previous.y) * 0.5;
       point.areaY = (previous.x - next.x) * 0.5;
@@ -187,22 +200,23 @@ class SoftWorld {
 
   repairFoldedMembrane(body) {
     const points = body.points;
+    var n = points.length;
     let centerX = 0, centerY = 0;
     for (const point of points) { centerX += point.x; centerY += point.y; }
-    centerX /= POINT_COUNT; centerY /= POINT_COUNT;
+    centerX /= n; centerY /= n;
     let hasAngularFold = false;
-    for (let index = 0; index < POINT_COUNT; index++) {
-      const first = points[index], second = points[(index + 1) % POINT_COUNT];
+    for (let index = 0; index < n; index++) {
+      const first = points[index], second = points[(index + 1) % n];
       if ((first.x - centerX) * (second.y - centerY) - (first.y - centerY) * (second.x - centerX) < -0.0001) { hasAngularFold = true; break; }
     }
     if (!hasAngularFold) return;
     const side = (first, second, point) => (second.x - first.x) * (point.y - first.y) - (second.y - first.y) * (point.x - first.x);
     let hasCrossing = false;
-    for (let firstIndex = 0; firstIndex < POINT_COUNT && !hasCrossing; firstIndex++) {
-      const first = points[firstIndex], second = points[(firstIndex + 1) % POINT_COUNT];
-      for (let secondIndex = firstIndex + 2; secondIndex < POINT_COUNT; secondIndex++) {
-        if (firstIndex === 0 && secondIndex === POINT_COUNT - 1) continue;
-        const third = points[secondIndex], fourth = points[(secondIndex + 1) % POINT_COUNT];
+    for (let firstIndex = 0; firstIndex < n && !hasCrossing; firstIndex++) {
+      const first = points[firstIndex], second = points[(firstIndex + 1) % n];
+      for (let secondIndex = firstIndex + 2; secondIndex < n; secondIndex++) {
+        if (firstIndex === 0 && secondIndex === n - 1) continue;
+        const third = points[secondIndex], fourth = points[(secondIndex + 1) % n];
         if (side(first, second, third) * side(first, second, fourth) < -0.000001 && side(third, fourth, first) * side(third, fourth, second) < -0.000001) { hasCrossing = true; break; }
       }
     }
@@ -217,19 +231,24 @@ class SoftWorld {
     return true;
   }
 
-  constrainBody(body, liquid) {
-    this.repairFoldedMembrane(body);
+  constrainBody(body, liquid, solverPasses) {
+    // Skip membrane repair on nearly-resting bodies (cheap path when crowded)
+    if (!(body.stillSeconds > 0.15 && body.impactExcitation < 0.02)) {
+      this.repairFoldedMembrane(body);
+    }
     const points = body.points;
+    var n = points.length;
+    var passes = solverPasses != null ? solverPasses : SOLVER_PASSES;
     // Membrane compliance can change without making the enclosed volume compressible.
     const edgeAlpha = (this.parameters.edgeCompliance + Math.pow(liquid, 2) * (this.parameters.liquidEdgeCompliance - this.parameters.edgeCompliance)) * (1 + (body.inverseMass - 1) * (1 - liquid)) / (Math.pow(FIXED_STEP, 2));
     const bendAlpha = (this.parameters.bendCompliance + Math.pow(liquid, 2) * (this.parameters.liquidBendCompliance - this.parameters.bendCompliance)) * (1 + (body.inverseMass - 1) * (1 - liquid)) / (Math.pow(FIXED_STEP, 2));
-    for (let index = 0; index < POINT_COUNT; index++) {
-      this.constrainDistance(points[index], points[(index + 1) % POINT_COUNT], body.edgeLength, edgeAlpha, body.inverseMass, body.edgeLambdas, index, 1.3 + liquid * 0.94);
-      this.constrainDistance(points[index], points[(index + 2) % POINT_COUNT], body.bendLength, bendAlpha, body.inverseMass, body.bendLambdas, index, 1.35 + liquid * 1.2);
+    for (let index = 0; index < n; index++) {
+      this.constrainDistance(points[index], points[(index + 1) % n], body.edgeLength, edgeAlpha, body.inverseMass, body.edgeLambdas, index, 1.3 + liquid * 0.94);
+      this.constrainDistance(points[index], points[(index + 2) % n], body.bendLength, bendAlpha, body.inverseMass, body.bendLambdas, index, 1.35 + liquid * 1.2);
     }
     this.updateGeometry(body);
     const shapeFrequency = this.parameters.shapeFrequency + liquid * (this.parameters.liquidShapeFrequency - this.parameters.shapeFrequency);
-    const returnStrength = Math.pow((2 * Math.PI * shapeFrequency * FIXED_STEP), 2) / SOLVER_PASSES;
+    const returnStrength = Math.pow((2 * Math.PI * shapeFrequency * FIXED_STEP), 2) / passes;
     for (const point of points) {
       const dx = point.x - body.x, dy = point.y - body.y;
       const distance = Math.hypot(dx, dy) || 1;
@@ -263,8 +282,9 @@ class SoftWorld {
     if (boundaryShiftX || boundaryShiftY) {
       const projectedArea = response => {
         let area = 0;
-        for (let index = 0; index < POINT_COUNT; index++) {
-          const first = points[index], second = points[(index + 1) % POINT_COUNT];
+        var pn = points.length;
+        for (let index = 0; index < pn; index++) {
+          const first = points[index], second = points[(index + 1) % pn];
           const firstX = clamp(first.x + boundaryShiftX * response, this.left + 1, this.right - 1);
           const firstY = Math.min(first.y + boundaryShiftY * response, this.floor - 1);
           const secondX = clamp(second.x + boundaryShiftX * response, this.left + 1, this.right - 1);
@@ -314,8 +334,9 @@ class SoftWorld {
     for (const obstacle of this.obstacles) {
       if (body.maxX < obstacle.x - obstacle.r - 2 || body.minX > obstacle.x + obstacle.r + 2 || body.maxY < obstacle.y - obstacle.r - 2 || body.minY > obstacle.y + obstacle.r + 2) continue;
       // Resolve the complete edge, since clear vertices can still leave a chord inside a circle.
-      for (let index = 0; index < POINT_COUNT; index++) {
-        const first = points[index], second = points[(index + 1) % POINT_COUNT];
+      var on = points.length;
+      for (let index = 0; index < on; index++) {
+        const first = points[index], second = points[(index + 1) % on];
         const edgeX = second.x - first.x, edgeY = second.y - first.y;
         const fraction = clamp(((obstacle.x - first.x) * edgeX + (obstacle.y - first.y) * edgeY) / (Math.pow(edgeX, 2) + Math.pow(edgeY, 2) || 1), 0, 1);
         const dx = first.x + fraction * edgeX - obstacle.x;
@@ -392,8 +413,9 @@ class SoftWorld {
   collideVertices(source, target) {
     let minimumOverlap = Infinity, normalX = 0, normalY = 0;
     for (const polygon of [source, target]) {
-      for (let index = 0; index < POINT_COUNT; index++) {
-        const first = polygon.points[index], second = polygon.points[(index + 1) % POINT_COUNT];
+      var pn = polygon.points.length;
+      for (let index = 0; index < pn; index++) {
+        const first = polygon.points[index], second = polygon.points[(index + 1) % pn];
         const edgeX = second.x - first.x, edgeY = second.y - first.y;
         const length = Math.hypot(edgeX, edgeY);
         if (length < 0.00001) continue;
@@ -522,8 +544,26 @@ class SoftWorld {
     if (Math.abs(liquid - this.lastLiquid) > 0.0001 || Math.abs(tilt - this.lastTilt) > 0.0001) for (const body of this.bodies) this.wake(body);
     this.lastLiquid = liquid; this.lastTilt = tilt;
     this.accumulator += Math.min(dt, 0.05);
+      var bodyCount = this.bodies.length;
+      var maxSub = MAX_SUBSTEPS;
+      var solverPasses = SOLVER_PASSES;
+      var restingDragMul = 1;
+      var sleepStillNeed = 0.65;
+      // Adaptive quality: keep full jelly feel for few fruits; throttle when crowded
+      if (bodyCount >= 16) {
+        maxSub = 1;
+        solverPasses = 1;
+        restingDragMul = 2.0;
+        sleepStillNeed = 0.38;
+      } else if (bodyCount >= 10) {
+        maxSub = 1;
+        solverPasses = 2;
+        restingDragMul = 1.4;
+        sleepStillNeed = 0.48;
+      }
+      this._solverPasses = solverPasses;
       var substeps = 0;
-      while (this.accumulator + 1e-12 >= FIXED_STEP && substeps < MAX_SUBSTEPS) {
+      while (this.accumulator + 1e-12 >= FIXED_STEP && substeps < maxSub) {
         substeps++;
       this.accumulator = Math.max(0, this.accumulator - FIXED_STEP);
       const previousContacts = this.contacts;
@@ -558,8 +598,8 @@ class SoftWorld {
         }
         this.updateGeometry(body);
       }
-      for (let pass = 0; pass < SOLVER_PASSES; pass++) {
-        for (const body of this.bodies) if (!body.isSleeping) this.constrainBody(body, liquid);
+      for (let pass = 0; pass < solverPasses; pass++) {
+        for (const body of this.bodies) if (!body.isSleeping) this.constrainBody(body, liquid, solverPasses);
         for (let firstIndex = 0; firstIndex < this.bodies.length; firstIndex++) {
           const first = this.bodies[firstIndex];
           for (let secondIndex = firstIndex + 1; secondIndex < this.bodies.length; secondIndex++) {
@@ -573,10 +613,16 @@ class SoftWorld {
               if (dxc * dxc + dyc * dyc > far * far) continue;
             }
             const key = first.id + ':' + second.id;
-            // Early-out: both sleeping — keep prior contact, skip solver work
+            // Early-out: both sleeping — keep prior contact, skip expensive collide
             if (first.isSleeping && second.isSleeping) {
               if (previousContacts.has(key)) this.contacts.set(key, [first, second]);
               continue;
+            }
+            // One sleeping + far centers: skip (AABB already passed but center far)
+            if ((first.isSleeping || second.isSleeping) && first.bound && second.bound) {
+              var dxs = first.x - second.x, dys = first.y - second.y;
+              var near = (first.bound + second.bound) * 0.85;
+              if (dxs * dxs + dys * dys > near * near) continue;
             }
             const firstContact = this.collideVertices(first, second);
             if (firstContact) { this.contacts.set(key, [first, second]); this.constrainPackingDistance(first, second); }
@@ -603,7 +649,7 @@ class SoftWorld {
           if (point.y >= this.floor - 1.001) { point.vx *= 0.8 + liquid * 0.14; point.vy = Math.min(point.vy, 0); }
           velocityX += point.vx; velocityY += point.vy;
         }
-        body.vx = velocityX / POINT_COUNT; body.vy = velocityY / POINT_COUNT;
+        body.vx = velocityX / body.points.length; body.vy = velocityY / body.points.length;
         const reboundY = body.floorBounceSpeed > 0 ? Math.min(0, -body.floorBounceSpeed - body.vy) : 0;
         if (reboundY || body.bounceX || body.bounceY) {
           for (const point of body.points) { point.vx += body.bounceX; point.vy += body.bounceY + reboundY; }
@@ -624,7 +670,7 @@ class SoftWorld {
         // Let visible impact oscillations finish, then damp tiny supported motion.
         const isSettling = body.hasSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 40;
         if (isSettling) {
-          const retention = Math.exp(-this.parameters.restingDrag * FIXED_STEP);
+          const retention = Math.exp(-this.parameters.restingDrag * restingDragMul * FIXED_STEP);
           const shiftX = body.vx * (retention - 1), shiftY = body.vy * (retention - 1);
           body.vx += shiftX; body.vy += shiftY;
           for (const point of body.points) { point.vx += shiftX; point.vy += shiftY; }
@@ -639,9 +685,9 @@ class SoftWorld {
         }
         this.updateGeometry(body);
         if (body.area < body.targetArea * .75) this.restoreMinimumArea(body);
-        if (body.age > body.growthSeconds + 0.5 && body.hasStableSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / POINT_COUNT < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
+        if (body.age > body.growthSeconds + 0.5 && body.hasStableSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / body.points.length < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
         else body.stillSeconds = 0;
-        if (body.stillSeconds > 0.65) {
+        if (body.stillSeconds > sleepStillNeed) {
           body.isSleeping = true; body.vx = 0; body.vy = 0;
           for (const point of body.points) { point.vx = 0; point.vy = 0; }
         }
