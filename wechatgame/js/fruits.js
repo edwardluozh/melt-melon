@@ -150,6 +150,73 @@ function preloadFruitImages(onDone) {
   return map;
 }
 
+
+/**
+ * Draw soft-body fruit: clip to membrane polygon, paint sprite over AABB.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {object} body SoftWorld body with points[], x, y, minX..maxY, currentRadius, level
+ * @param {object} def fruit def
+ * @param {Object.<string, Image>} [images]
+ */
+function drawSoftFruit(ctx, body, def, images) {
+  if (!body || !body.points || !body.points.length) return;
+  var points = body.points;
+  var minX = body.minX;
+  var minY = body.minY;
+  var maxX = body.maxX;
+  var maxY = body.maxY;
+  if (minX == null) {
+    minX = points[0].x; minY = points[0].y; maxX = points[0].x; maxY = points[0].y;
+    for (var i = 1; i < points.length; i++) {
+      var p = points[i];
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  var pad = 1;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+  var w = Math.max(2, maxX - minX);
+  var h = Math.max(2, maxY - minY);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (var j = 1; j < points.length; j++) {
+    ctx.lineTo(points[j].x, points[j].y);
+  }
+  ctx.closePath();
+  ctx.clip();
+
+  var img = images && def.sprite ? images[def.sprite] : null;
+  if (img && img.width > 0 && img.height > 0) {
+    // Cover AABB with a square centered on centroid so deformation reads as squash
+    var side = Math.max(w, h);
+    var cx = body.x != null ? body.x : (minX + maxX) * 0.5;
+    var cy = body.y != null ? body.y : (minY + maxY) * 0.5;
+    ctx.drawImage(img, cx - side * 0.5, cy - side * 0.5, side, side);
+  } else {
+    var r = body.currentRadius || def.radius;
+    var cx2 = body.x != null ? body.x : (minX + maxX) * 0.5;
+    var cy2 = body.y != null ? body.y : (minY + maxY) * 0.5;
+    var grd = ctx.createRadialGradient(cx2 - r * 0.3, cy2 - r * 0.35, r * 0.1, cx2, cy2, r);
+    grd.addColorStop(0, '#ffffffcc');
+    grd.addColorStop(0.35, def.color);
+    grd.addColorStop(1, def.stroke);
+    ctx.fillStyle = grd;
+    ctx.fill();
+    ctx.lineWidth = Math.max(1.5, r * 0.06);
+    ctx.strokeStyle = def.stroke;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (var k = 1; k < points.length; k++) ctx.lineTo(points[k].x, points[k].y);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 module.exports = {
   FRUITS: FRUITS,
   DROP_LEVEL_COUNT: DROP_LEVEL_COUNT,
@@ -158,5 +225,6 @@ module.exports = {
   randomDropLevel: randomDropLevel,
   drawFruit: drawFruit,
   drawFruitJelly: drawFruitJelly,
+  drawSoftFruit: drawSoftFruit,
   preloadFruitImages: preloadFruitImages,
 };

@@ -5,7 +5,6 @@
  * 坐标模型：canvas 缓冲区 = css * dpr，每帧 ctx.setTransform(dpr,…)
  * 之后全部用「屏幕 CSS 像素」绘制与命中，与 touch clientX/Y 一致。
  */
-var Matter = require('./matter.min.js');
 var fruits = require('./fruits.js');
 var physics = require('./physics.js');
 var merge = require('./merge.js');
@@ -13,27 +12,24 @@ var scoreMod = require('./score.js');
 
 var getFruit = fruits.getFruit;
 var drawFruit = fruits.drawFruit;
+var drawSoftFruit = fruits.drawSoftFruit;
 var randomDropLevel = fruits.randomDropLevel;
 var preloadFruitImages = fruits.preloadFruitImages;
 var LOGICAL_W = physics.LOGICAL_W;
 var LOGICAL_H = physics.LOGICAL_H;
 var FAIL_LINE_Y = physics.FAIL_LINE_Y;
 var DROP_Y = physics.DROP_Y;
-var createEngine = physics.createEngine;
-var createWalls = physics.createWalls;
-var createFruitBody = physics.createFruitBody;
-var getFruitData = physics.getFruitData;
-var isFruitBody = physics.isFruitBody;
-var isWallBody = physics.isWallBody;
-var fixedStep = physics.fixedStep;
-var applyJellySquash = physics.applyJellySquash;
-var updateJelly = physics.updateJelly;
-var attachMergeHandler = merge.attachMergeHandler;
+var MAX_BODIES = physics.MAX_BODIES;
+var createSoftWorld = physics.createSoftWorld;
+var processMerges = merge.processMerges;
 var ScoreManager = scoreMod.ScoreManager;
 
 var DROP_COOLDOWN_MS = 450;
 var FAIL_HOLD_MS = 3000;
 var ENERGY_DEFAULT = 100;
+var ENERGY_RESTORE_MERGE = 15;
+var SOFTEN_COST = 50;
+var SOFTEN_SECONDS = 2.4;
 var PLAY_BOTTOM_PAD = 8;
 
 /** Never retry getSystemInfoSync after a failure (jsbridge not ready spam). */
@@ -176,8 +172,7 @@ function Game() {
     this.canvas.height = Math.max(1, Math.floor(this.screenH * this.pixelRatio));
   }
 
-  this.engine = createEngine();
-  createWalls(this.engine.world);
+  this.softWorld = createSoftWorld();
   this.scoreMgr = new ScoreManager();
 
   this.pendingLevel = randomDropLevel();
@@ -191,7 +186,9 @@ function Game() {
   this.lastTs = 0;
   this.energy = ENERGY_DEFAULT;
   this.floatTexts = [];
-  this.physAccum = { value: 0 };
+  this.softenRemaining = 0;
+  this.liquid = 0;
+  this.failTimers = {};
 
   this.fruitImages = {};
 
@@ -205,13 +202,12 @@ function Game() {
   this.playOffsetY = this.HUD_H;
   this.hitRestart = { x: 0, y: 0, w: 0, h: 0 };
   this.hitDrop = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitSoften = { x: 0, y: 0, w: 0, h: 0 };
   this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.hitOverlayRestart = { x: 0, y: 0, w: 0, h: 0 };
 
   this._layout();
-  this._bindMerge();
-  this._bindJelly();
   this._bindTouch();
   this._preloadImages();
 }
@@ -262,12 +258,13 @@ Game.prototype._layout = function () {
   this.topPad = topPad;
   this.scoresY = topPad;
 
-  var pad = 14;
+  var pad = 10;
   var btnH = 40;
-  var restartW = 92;
-  var dropW = 84;
-  var nudgeW = 42;
-  var gap = 10;
+  var restartW = 78;
+  var dropW = 68;
+  var softenW = 68;
+  var nudgeW = 36;
+  var gap = 6;
   var row1H = 44;
   var btnY = topPad + row1H + 12;
 
@@ -304,10 +301,16 @@ Game.prototype._layout = function () {
     w: dropW,
     h: btnH,
   };
+  this.hitSoften = {
+    x: this.hitDrop.x - softenW - gap,
+    y: btnY,
+    w: softenW,
+    h: btnH,
+  };
 
-  // Compact nudge arrows left of primary drop when space allows
-  var nudgeRight = this.hitDrop.x - gap;
-  var nudgePairW = nudgeW * 2 + 8;
+  // Compact nudge arrows left of soften when space allows
+  var nudgeRight = this.hitSoften.x - gap;
+  var nudgePairW = nudgeW * 2 + 6;
   if (nudgeRight - nudgePairW >= pad) {
     this.hitNudgeL = {
       x: nudgeRight - nudgePairW,
@@ -316,7 +319,7 @@ Game.prototype._layout = function () {
       h: btnH,
     };
     this.hitNudgeR = {
-      x: this.hitNudgeL.x + nudgeW + 8,
+      x: this.hitNudgeL.x + nudgeW + 6,
       y: btnY,
       w: nudgeW,
       h: btnH,
@@ -336,68 +339,6 @@ Game.prototype._layout = function () {
   this.playScale = fit;
   this.playOffsetX = (availW - LOGICAL_W * fit) / 2;
   this.playOffsetY = hudH + Math.max(0, (availH - LOGICAL_H * fit) / 2);
-};
-
-Game.prototype._bindMerge = function () {
-  var self = this;
-  attachMergeHandler(
-    this.engine,
-    function (baseScore, _level, x, y) {
-      var gained = self.scoreMgr.addMerge(baseScore);
-      self.floatTexts.push({
-        x: x,
-        y: y,
-        text: '+' + gained,
-        life: 700,
-      });
-    },
-    function () {
-      return !self.gameOver;
-    }
-  );
-};
-
-Game.prototype._bindJelly = function () {
-  var engine = this.engine;
-  Matter.Events.on(engine, 'collisionStart', function (event) {
-    var pairs = event.pairs;
-    for (var i = 0; i < pairs.length; i++) {
-      var pair = pairs[i];
-      var a = pair.bodyA;
-      var b = pair.bodyB;
-      var aFruit = isFruitBody(a);
-      var bFruit = isFruitBody(b);
-      if (!aFruit && !bFruit) continue;
-      // fruit-fruit or fruit-wall
-      if (!(aFruit && bFruit) && !(aFruit && isWallBody(b)) && !(bFruit && isWallBody(a))) {
-        continue;
-      }
-
-      var nx = 0;
-      var ny = 1;
-      if (pair.collision && pair.collision.normal) {
-        nx = pair.collision.normal.x;
-        ny = pair.collision.normal.y;
-      } else {
-        var dx = b.position.x - a.position.x;
-        var dy = b.position.y - a.position.y;
-        var len = Math.sqrt(dx * dx + dy * dy) || 1;
-        nx = dx / len;
-        ny = dy / len;
-      }
-
-      var rvx = (a.velocity ? a.velocity.x : 0) - (b.velocity ? b.velocity.x : 0);
-      var rvy = (a.velocity ? a.velocity.y : 0) - (b.velocity ? b.velocity.y : 0);
-      var speed = Math.sqrt(rvx * rvx + rvy * rvy);
-
-      if (aFruit) {
-        applyJellySquash(a, { x: -nx, y: -ny }, speed);
-      }
-      if (bFruit) {
-        applyJellySquash(b, { x: nx, y: ny }, speed);
-      }
-    }
-  });
 };
 
 
@@ -558,6 +499,12 @@ Game.prototype._onTouchStart = function (sx, sy) {
     this.aiming = false;
     return;
   }
+  if (this.hitSoften.w > 0 && this._hitRect(this.hitSoften, sx, sy)) {
+    this._activateSoften();
+    this.pointerMode = 'idle';
+    this.aiming = false;
+    return;
+  }
   if (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) {
     this._nudgeAim(-1);
     return;
@@ -584,6 +531,7 @@ Game.prototype._onTouchMove = function (sx, sy) {
   if (
     this._hitRect(this.hitRestart, sx, sy) ||
     (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) ||
+    (this.hitSoften.w > 0 && this._hitRect(this.hitSoften, sx, sy)) ||
     (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) ||
     (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy))
   ) {
@@ -606,18 +554,22 @@ Game.prototype._onTouchEnd = function () {
 
 Game.prototype._dropFruit = function () {
   if (!this.canDrop || this.gameOver) return;
+  if (this.softWorld.bodies.length >= MAX_BODIES) return;
   this.canDrop = false;
   this.scoreMgr.resetChain();
 
   var x = this._clampAimX(this.aimX);
-  var body = createFruitBody(x, DROP_Y, this.pendingLevel);
-  Matter.Body.setVelocity(body, { x: 0, y: 4 });
-  Matter.World.add(this.engine.world, body);
+  var def = getFruit(this.pendingLevel);
+  this.softWorld.add(this.pendingLevel, x, DROP_Y, def.radius, {
+    vx: 0,
+    vy: 80,
+    growFrom: 0.85,
+    growthSeconds: 0.2,
+  });
 
   this.pendingLevel = this.nextLevel;
   this.nextLevel = randomDropLevel();
 
-  // 立刻刷新一帧，避免循环未跑时看起来“点了没反应”
   try {
     this._render();
   } catch (e) {}
@@ -628,6 +580,19 @@ Game.prototype._dropFruit = function () {
   }, DROP_COOLDOWN_MS);
 };
 
+Game.prototype._activateSoften = function () {
+  if (this.gameOver) return;
+  if (this.energy < SOFTEN_COST) return;
+  if (this.softenRemaining > 0.15) return;
+  this.energy -= SOFTEN_COST;
+  this.softenRemaining = SOFTEN_SECONDS;
+  this.liquid = 1;
+  var bodies = this.softWorld.bodies;
+  for (var i = 0; i < bodies.length; i++) {
+    this.softWorld.wake(bodies[i]);
+  }
+};
+
 Game.prototype._restart = function () {
   this.gameOver = false;
   this.canDrop = true;
@@ -635,11 +600,11 @@ Game.prototype._restart = function () {
   this.pointerMode = 'idle';
   this.floatTexts = [];
   this.energy = ENERGY_DEFAULT;
+  this.softenRemaining = 0;
+  this.liquid = 0;
+  this.failTimers = {};
   this.scoreMgr.reset();
-  this.physAccum.value = 0;
-
-  var fruitBodies = this.engine.world.bodies.filter(isFruitBody);
-  Matter.World.remove(this.engine.world, fruitBodies);
+  this.softWorld.clear();
 
   this.pendingLevel = randomDropLevel();
   this.nextLevel = randomDropLevel();
@@ -648,12 +613,39 @@ Game.prototype._restart = function () {
 Game.prototype._update = function (dt) {
   this._drainTouchQueue();
 
-  fixedStep(this.engine, dt, this.physAccum);
-
-  var bodies = this.engine.world.bodies;
-  for (var i = 0; i < bodies.length; i++) {
-    if (isFruitBody(bodies[i])) updateJelly(bodies[i]);
+  var dtSec = dt / 1000;
+  if (this.softenRemaining > 0) {
+    this.softenRemaining = Math.max(0, this.softenRemaining - dtSec);
+    if (this.softenRemaining <= 0) {
+      this.liquid = 0;
+    } else if (this.softenRemaining < 0.35) {
+      this.liquid = this.softenRemaining / 0.35;
+    } else {
+      this.liquid = 1;
+    }
+  } else {
+    this.liquid = 0;
   }
+
+  this.softWorld.step(dtSec, { liquid: this.liquid, tilt: 0 });
+
+  var self = this;
+  processMerges(
+    this.softWorld,
+    function (baseScore, _level, x, y) {
+      var gained = self.scoreMgr.addMerge(baseScore);
+      self.energy = Math.min(ENERGY_DEFAULT, self.energy + ENERGY_RESTORE_MERGE);
+      self.floatTexts.push({
+        x: x,
+        y: y,
+        text: '+' + gained,
+        life: 700,
+      });
+    },
+    function () {
+      return !self.gameOver;
+    }
+  );
 
   for (var j = 0; j < this.floatTexts.length; j++) {
     this.floatTexts[j].life -= dt;
@@ -668,30 +660,37 @@ Game.prototype._update = function (dt) {
 
 Game.prototype._checkFailLine = function () {
   var now = nowMs();
-  var bodies = this.engine.world.bodies;
+  var bodies = this.softWorld.bodies;
+  var alive = {};
   for (var i = 0; i < bodies.length; i++) {
     var body = bodies[i];
-    var data = getFruitData(body);
-    if (!data) continue;
+    alive[body.id] = true;
+    // Ignore freshly spawned / still growing
+    if (body.age < (body.growthSeconds || 0) + 0.45) {
+      this.failTimers[body.id] = null;
+      continue;
+    }
 
     var settled =
       body.isSleeping ||
-      (Math.abs(body.velocity.x) < 0.15 &&
-        Math.abs(body.velocity.y) < 0.15 &&
-        Math.abs(body.angularVelocity) < 0.05);
+      (Math.abs(body.vx) < 12 && Math.abs(body.vy) < 12);
 
-    var above = body.position.y < FAIL_LINE_Y;
+    var above = body.y < FAIL_LINE_Y;
 
     if (above && settled) {
-      if (data.settledAtAbove == null) {
-        data.settledAtAbove = now;
-      } else if (now - data.settledAtAbove >= FAIL_HOLD_MS) {
+      if (this.failTimers[body.id] == null) {
+        this.failTimers[body.id] = now;
+      } else if (now - this.failTimers[body.id] >= FAIL_HOLD_MS) {
         this._triggerGameOver();
         return;
       }
     } else {
-      data.settledAtAbove = null;
+      this.failTimers[body.id] = null;
     }
+  }
+  // Drop timers for removed bodies
+  for (var id in this.failTimers) {
+    if (!alive[id]) delete this.failTimers[id];
   }
 };
 
@@ -780,6 +779,14 @@ Game.prototype._drawHUD = function (ctx) {
     this._drawButton(ctx, this.hitNudgeL, '◀', false);
     this._drawButton(ctx, this.hitNudgeR, '▶', false);
   }
+  var softenBusy = this.softenRemaining > 0.05;
+  var softenDisabled = this.gameOver || this.energy < SOFTEN_COST || softenBusy;
+  this._drawButton(
+    ctx,
+    this.hitSoften,
+    softenBusy ? '揉软中' : '揉软',
+    softenDisabled
+  );
   this._drawPrimaryButton(ctx, this.hitDrop, '投放');
   this._drawButton(ctx, this.hitRestart, '重新开始', false);
 };
@@ -872,18 +879,17 @@ Game.prototype._drawPlayfield = function (ctx) {
     ctx.globalAlpha = 1;
   }
 
-  var bodies = this.engine.world.bodies;
+  var bodies = this.softWorld.bodies;
   for (var i = 0; i < bodies.length; i++) {
     var body = bodies[i];
-    var data = getFruitData(body);
-    if (!data) continue;
-    var def = getFruit(data.level);
-    var j = data.jelly || { sx: 1, sy: 1 };
-    drawFruit(ctx, body.position.x, body.position.y, def, 1, images, {
-      sx: j.sx,
-      sy: j.sy,
-      angle: body.angle,
-    });
+    var def = getFruit(body.level);
+    drawSoftFruit(ctx, body, def, images);
+  }
+
+  // Soften overlay tint when liquid active
+  if (this.liquid > 0.05) {
+    ctx.fillStyle = 'rgba(100, 180, 255, ' + (0.08 + this.liquid * 0.1) + ')';
+    ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
   }
 
   for (var k = 0; k < this.floatTexts.length; k++) {

@@ -1,6 +1,6 @@
-# 软西瓜 Melt Melon — 微信小游戏（M1）
+# 软西瓜 Melt Melon — 微信小游戏（软体物理）
 
-本目录为可直接用 **微信开发者工具** 打开的小游戏工程，由仓库根目录的 Vite+Matter 浏览器版移植而来。
+本目录为可直接用 **微信开发者工具** 打开的小游戏工程。水果使用 SoftWorld 软体（XPBD 膜 + 压力），非 Matter 刚体圆。
 
 ## 用微信开发者工具打开
 
@@ -11,39 +11,40 @@
 5. 编译类型应为 **游戏**（`compileType: game`）
 6. 点击编译 / 预览即可在模拟器中试玩
 
-## 玩法（与浏览器 M1 一致）
+## 玩法
 
-- 手指左右拖动瞄准，松手投放；拖出场地可取消
-- 相同水果碰撞合成下一级，连消加分
-- 水果中心在危险线上方静止约 3 秒则游戏结束
-- 「揉软一下」为 M2 占位，当前禁用
+- 手指左右拖动瞄准，松手投放；或点「投放」
+- 相同水果接触合成下一级，连消加分；合成回复少量能量
+- 「揉软」消耗能量，约 2.4s 内水果更软、可挤过缝隙
+- 水果质心在危险线上方静止约 3 秒则游戏结束
 - 最高分键名：`melt-melon-highscore`（`wx.getStorageSync` / `setStorageSync`）
 
 ## 目录说明
 
 ```
 wechatgame/
-  project.config.json          # 工程配置（compileType: game）
-  project.private.config.json  # 本地私有配置（可选）
-  game.json                    # 竖屏等小游戏配置
-  game.js                      # 入口：创建并启动 Game
+  project.config.json
+  game.json
+  game.js                      # 入口
   js/
-    matter.min.js              # 自 node_modules 拷贝的 Matter.js
-    fruits.js                  # 水果阶梯与绘制
-    physics.js                 # 引擎 / 墙体 / 刚体
-    merge.js                   # 合成逻辑
-    score.js                   # 得分与本地最高分
-    game-core.js               # 主 Game 类（wx Canvas + 触摸）
+    soft-world.js              # SoftWorld 软体物理
+    physics.js                 # 场地常量 + SoftWorld 工厂
+    fruits.js                  # 水果阶梯 / 精灵 / 软体裁剪绘制
+    merge.js                   # SoftWorld contacts 合成
+    score.js
+    game-core.js               # 主 Game（Canvas + 触摸）
+    matter.min.js              # 未使用（可删）
+  _ref_softworld_extract.js    # 参考摘录，勿 require
   README.md
 ```
 
 ## 适配说明
 
-- 渲染：`wx.createCanvas()` 主画布；无 DOM，HUD / 按钮 / 结算层均画在 canvas 上
+- 渲染：`wx.createCanvas()`；HUD / 按钮 / 结算层均画在 canvas 上
 - 触摸：`wx.onTouchStart` / `Move` / `End` / `Cancel`
-- 动画：`requestAnimationFrame`
-- 存储：`wx.getStorageSync` / `wx.setStorageSync`
-- 物理：CommonJS `require('./matter.min.js')`
+- 主循环：`setInterval`（开发者工具 rAF 不稳定）
+- 物理：`js/soft-world.js`（POINT_COUNT=16, FIXED_STEP=1/60, SOLVER_PASSES=4）
+- 绘制：对 soft hull `clip()` 后贴水果 PNG
 
 ## 注意
 
