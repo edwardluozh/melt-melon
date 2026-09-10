@@ -16,7 +16,10 @@ var drawSoftFruit = fruits.drawSoftFruit;
 var randomDropLevel = fruits.randomDropLevel;
 var preloadFruitImages = fruits.preloadFruitImages;
 var FRUITS = fruits.FRUITS;
-var TOP_LEVEL = FRUITS.length - 1;
+var MELON_LEVEL = fruits.MELON_LEVEL != null ? fruits.MELON_LEVEL : 6;
+var TOP_LEVEL = MELON_LEVEL; // alias: round watermelon is the goal
+/** HUD uses whole round watermelon (fruit_6), not wedge fruit_7 */
+var HUD_MELON_LEVEL = 6;
 var LOGICAL_W = physics.LOGICAL_W;
 var LOGICAL_H = physics.LOGICAL_H;
 var FAIL_LINE_Y = physics.FAIL_LINE_Y;
@@ -257,27 +260,38 @@ Game.prototype._layout = function () {
   var mb = this.menuButton;
   var safeTop = this.safeTop || 0;
   var pad = 12;
-  var btnH = 36;
+  var btnH = 32;
   var restartW = 78;
+  var iconR = 14;
 
-  // Align controls with capsule row when available
-  var rowY = mb ? mb.top + (mb.height - btnH) / 2 : safeTop + 10;
-  if (rowY < safeTop + 4) rowY = safeTop + 4;
+  // Top reserved by status bar + WeChat capsule
+  var capsuleTop = mb ? mb.top : safeTop;
+  var capsuleBottom = mb ? mb.bottom : safeTop + 32;
+  var capsuleH = Math.max(mb ? mb.height : 32, 28);
+  var bandTop = Math.max(safeTop, Math.min(capsuleTop, safeTop + 4));
+  // Band between status/capsule and playfield: enough room under capsule
+  var bandBottom = Math.max(capsuleBottom, bandTop + capsuleH) + 10;
+  if (bandBottom - bandTop < btnH + 16) bandBottom = bandTop + btnH + 16;
+
+  // Vertically center melon row + restart in that band
+  var bandMid = (bandTop + bandBottom) / 2;
+  var rowY = bandMid - btnH / 2;
+  if (rowY < bandTop + 2) rowY = bandTop + 2;
   this.topPad = rowY;
 
-  var rightEdge = mb ? mb.left - 10 : this.screenW - pad;
+  var rightEdge = mb ? mb.left - 8 : this.screenW - pad;
   this.hitRestart = {
-    x: Math.max(pad, rightEdge - restartW),
+    x: Math.max(pad + 80, rightEdge - restartW),
     y: rowY,
     w: restartW,
     h: btnH,
   };
 
-  // Melon counter sits on the left of the same row
+  // Left: whole watermelon icon + ×N (same vertical center as restart)
   this.melonHud = {
     x: pad,
     cy: rowY + btnH / 2,
-    iconR: 15,
+    iconR: iconR,
   };
 
   // Hide unused controls (soften kept in code, not in UI)
@@ -287,8 +301,7 @@ Game.prototype._layout = function () {
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.nextPreview = { x: 0, y: 0, r: 0 };
 
-  var bottomOfRow = Math.max(mb ? mb.bottom : 0, rowY + btnH);
-  this.HUD_H = bottomOfRow + 12;
+  this.HUD_H = Math.max(bandBottom, rowY + btnH + 8);
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -558,7 +571,7 @@ Game.prototype._update = function (dt) {
     function (newLevel, _fromLevel, x, y) {
       // Soften energy restore kept for later skill reuse (UI hidden)
       self.energy = Math.min(ENERGY_DEFAULT, self.energy + ENERGY_RESTORE_MERGE);
-      if (newLevel === TOP_LEVEL) {
+      if (newLevel === MELON_LEVEL) {
         self.scoreMgr.addMelon();
         self.floatTexts.push({
           x: x,
@@ -661,13 +674,13 @@ Game.prototype._drawHUD = function (ctx) {
   ctx.lineTo(sw, hudH - 0.5);
   ctx.stroke();
 
-  // Left: watermelon icon + ×N
-  var defTop = getFruit(TOP_LEVEL);
+  // Left: whole round watermelon (fruit_6) + ×N
+  var defMelon = getFruit(HUD_MELON_LEVEL);
   var iconR = mh.iconR;
   var iconX = mh.x + iconR;
   var iconY = mh.cy;
-  var iconScale = iconR / defTop.radius;
-  drawFruit(ctx, iconX, iconY, defTop, iconScale, this.fruitImages);
+  var iconScale = iconR / defMelon.radius;
+  drawFruit(ctx, iconX, iconY, defMelon, iconScale, this.fruitImages);
 
   var count = this.scoreMgr.melonCount;
   ctx.fillStyle = '#5a3d2b';

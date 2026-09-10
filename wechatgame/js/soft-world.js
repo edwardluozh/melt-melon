@@ -2,10 +2,10 @@
  * SoftWorld soft-body physics (XPBD membrane) — ported from melt-melon SoftWorld.
  * WeChat-friendly: no optional chaining / nullish coalescing.
  */
-var POINT_COUNT = 16;
+var POINT_COUNT = 14;
 var FIXED_STEP = 1 / 60;
-var MAX_SUBSTEPS = 3;
-var SOLVER_PASSES = 4;
+var MAX_SUBSTEPS = 2;
+var SOLVER_PASSES = 3;
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -30,10 +30,10 @@ class SoftWorld {
       shapeFrequency: 2.9, liquidShapeFrequency: 0.8,
       edgeCompliance: 0.00012, bendCompliance: 0.0012,
       liquidEdgeCompliance: 0.004, liquidBendCompliance: 0.025,
-      restitution: 0.22, liquidRestitution: 0.055, maximumBounceHeightRatio: 0.55,
+      restitution: 0.28, liquidRestitution: 0.055, maximumBounceHeightRatio: 0.55,
       minimumRadiusRatio: 0.76, liquidMinimumRadiusRatio: 0.34, impactRadiusAllowance: 0.24,
       floorImpactCompression: 0.52, liquidFloorImpactCompression: 0.82,
-      packingRadiusRatio: 0.96, contactFriction: 0.55, minimumBoundaryAreaRatio: 0.8, restingDrag: 20, restingInternalDamping: 16,
+      packingRadiusRatio: 0.90, contactFriction: 0.18, minimumBoundaryAreaRatio: 0.8, restingDrag: 20, restingInternalDamping: 16,
       impactShapeRate: 4.0, impactThreshold: 80, impactCooldownSeconds: 0.1, impactDecay: 2.8,
       maximumSpeed: 2400,
     };
@@ -60,16 +60,17 @@ class SoftWorld {
     y = Math.min(y, this.floor - initialRadius - 1);
     const velocityX = (options.vx != null ? options.vx : 0);
     const velocityY = (options.vy != null ? options.vy : 0);
-    const points = Array.from({ length: POINT_COUNT }, (_, index) => {
-      const angle = index * Math.PI * 2 / POINT_COUNT;
-      return { x: x + Math.cos(angle) * initialRadius, y: y + Math.sin(angle) * initialRadius, vx: velocityX, vy: velocityY, oldX: 0, oldY: 0 };
-    });
+    const points = [];
+    for (var pti = 0; pti < POINT_COUNT; pti++) {
+      var angle = pti * Math.PI * 2 / POINT_COUNT;
+      points.push({ x: x + Math.cos(angle) * initialRadius, y: y + Math.sin(angle) * initialRadius, vx: velocityX, vy: velocityY, oldX: 0, oldY: 0 });
+    }
     const body = {
       id: this.nextId++, level, r, x, y, stepStartX: x, stepStartY: y, vx: velocityX, vy: velocityY, age: 0, points,
       initialRatio, growthSeconds: initialRatio < 1 ? Math.max(options.growthSeconds != null ? options.growthSeconds : 0.35, 0.15) : 0,
       currentRadius: initialRadius, inverseMass: 900 / (r * r),
       edgeLambdas: new Float64Array(POINT_COUNT), bendLambdas: new Float64Array(POINT_COUNT),
-      isSleeping: false, hasSupport: false, stillSeconds: 0, repairRecoverySeconds: 0, area: 0, targetArea: 0,
+      isSleeping: false, hasSupport: false, hasStableSupport: false, stillSeconds: 0, repairRecoverySeconds: 0, area: 0, targetArea: 0,
       shapeImpulseA: 0, shapeImpulseB: 0, impactExcitation: 0, lastImpactSpeed: 0, floorBounceSpeed: 0, bounceX: 0, bounceY: 0,
     };
     this.updateRestShape(body);
@@ -246,7 +247,7 @@ class SoftWorld {
     for (const point of points) {
       minimumX = Math.min(minimumX, point.x); maximumX = Math.max(maximumX, point.x); maximumY = Math.max(maximumY, point.y);
     }
-    if (maximumY >= this.floor - 1.05) body.hasSupport = true;
+    if (maximumY >= this.floor - 1.05) { body.hasSupport = true; body.hasStableSupport = true; }
     if (maximumY > this.floor - 1 && body.frameVelocityY > 0) {
       const contactPoint = points.reduce((lowest, point) => point.y > lowest.y ? point : lowest, points[0]);
       if (this.registerImpact(body, null, 0, -1, body.frameVelocityY, contactPoint.x, this.floor - 1, body.id + ':floor')) {
@@ -366,13 +367,25 @@ class SoftWorld {
     const nx = dx / distance, ny = dy / distance;
     if (ny > .3) first.hasSupport = true;
     if (ny < -.3) second.hasSupport = true;
-    for (const [body, amount] of [[first, -overlap * firstMass / (firstMass + secondMass)], [second, overlap * secondMass / (firstMass + secondMass)]]) {
-      if (!amount) continue;
-      for (const point of body.points) {
-        point.x += nx * amount; point.y += ny * amount;
-        if (body.isPlacementRepair) { point.repairX += nx * amount; point.repairY += ny * amount; }
+    if (ny > .55) first.hasStableSupport = true;
+    if (ny < -.55) second.hasStableSupport = true;
+    var firstAmount = -overlap * firstMass / (firstMass + secondMass);
+    var secondAmount = overlap * secondMass / (firstMass + secondMass);
+    if (firstAmount) {
+      for (var pi = 0; pi < first.points.length; pi++) {
+        var point = first.points[pi];
+        point.x += nx * firstAmount; point.y += ny * firstAmount;
+        if (first.isPlacementRepair) { point.repairX += nx * firstAmount; point.repairY += ny * firstAmount; }
       }
-      this.updateGeometry(body);
+      this.updateGeometry(first);
+    }
+    if (secondAmount) {
+      for (var qi = 0; qi < second.points.length; qi++) {
+        var qpoint = second.points[qi];
+        qpoint.x += nx * secondAmount; qpoint.y += ny * secondAmount;
+        if (second.isPlacementRepair) { qpoint.repairX += nx * secondAmount; qpoint.repairY += ny * secondAmount; }
+      }
+      this.updateGeometry(second);
     }
   }
 
@@ -406,8 +419,19 @@ class SoftWorld {
     }
     if (normalY > 0.3) source.hasSupport = true;
     if (normalY < -0.3) target.hasSupport = true;
+    if (normalY > 0.55) source.hasStableSupport = true;
+    if (normalY < -0.55) target.hasStableSupport = true;
     if (minimumOverlap <= 0) return true;
-    if (minimumOverlap > 0.55 || Math.hypot(source.vx - target.vx, source.vy - target.vy) > 18) {
+    // Wake perched / side contacts and any sleeping body touching a moving one.
+    var relSpeed = Math.hypot(source.vx - target.vx, source.vy - target.vy);
+    var shallowSupport = Math.abs(normalY) < 0.55;
+    if (
+      minimumOverlap > 0.35 ||
+      relSpeed > 8 ||
+      shallowSupport ||
+      (source.isSleeping && !target.isSleeping) ||
+      (target.isSleeping && !source.isSleeping)
+    ) {
       if (source.isSleeping) this.wake(source);
       if (target.isSleeping) this.wake(target);
     }
@@ -450,11 +474,14 @@ class SoftWorld {
     const targetShift = bulkSeparation * targetMass / (sourceMass + targetMass);
     const tangentX = -normalY, tangentY = normalX;
     let frictionDisplacement = 0;
+    // Tangential stickiness scales with support-like contacts (|nY| high). Side/slope
+    // contacts keep low friction so small fruits slide off large curves.
     if (!isBirthRepair && this.parameters.contactFriction > 0) {
       const relativeX = target.x - target.stepStartX - source.x + source.stepStartX;
       const relativeY = target.y - target.stepStartY - source.y + source.stepStartY;
       const supportDisplacement = this.parameters.gravity * Math.pow(FIXED_STEP, 2) * Math.abs(normalY);
-      const frictionLimit = this.parameters.contactFriction * (1 - this.lastLiquid) * (minimumOverlap + supportDisplacement);
+      const slopeFactor = Math.pow(Math.abs(normalY), 1.35);
+      const frictionLimit = this.parameters.contactFriction * slopeFactor * (1 - this.lastLiquid) * (minimumOverlap * 0.65 + supportDisplacement);
       frictionDisplacement = clamp(relativeX * tangentX + relativeY * tangentY, -frictionLimit, frictionLimit);
     }
     const sourceFriction = frictionDisplacement * sourceMass / (sourceMass + targetMass);
@@ -500,7 +527,11 @@ class SoftWorld {
         substeps++;
       this.accumulator = Math.max(0, this.accumulator - FIXED_STEP);
       const previousContacts = this.contacts;
-      this.contacts = new Map();
+      var nextContacts = this._contactsAlt;
+      if (!nextContacts) { nextContacts = new Map(); this._contactsAlt = nextContacts; }
+      nextContacts.clear();
+      this.contacts = nextContacts;
+      this._contactsAlt = previousContacts;
       this.diagnostics.substeps++;
       this.time += FIXED_STEP;
       const airRetention = Math.exp(-this.parameters.airDrag * FIXED_STEP);
@@ -508,6 +539,7 @@ class SoftWorld {
         body.stepStartX = body.x; body.stepStartY = body.y;
         body.age += FIXED_STEP;
         body.hasSupport = false;
+        body.hasStableSupport = false;
         body.impactExcitation *= Math.exp(-(this.parameters.impactDecay + liquid * (5.5 - this.parameters.impactDecay)) * FIXED_STEP);
         body.floorBounceSpeed = 0; body.bounceX = 0; body.bounceY = 0;
         body.isPlacementRepair = false;
@@ -532,15 +564,22 @@ class SoftWorld {
           const first = this.bodies[firstIndex];
           for (let secondIndex = firstIndex + 1; secondIndex < this.bodies.length; secondIndex++) {
             const second = this.bodies[secondIndex];
-            if (first.maxX + 1.2 < second.minX || second.maxX + 1.2 < first.minX || first.maxY + 1.2 < second.minY || second.maxY + 1.2 < first.minY) continue;
+            // Broadphase: skip far AABB pairs (use bound radii when available)
+            var pad = 1.2;
+            if (first.maxX + pad < second.minX || second.maxX + pad < first.minX || first.maxY + pad < second.minY || second.maxY + pad < first.minY) continue;
+            if (first.bound && second.bound) {
+              var dxc = first.x - second.x, dyc = first.y - second.y;
+              var far = first.bound + second.bound + pad;
+              if (dxc * dxc + dyc * dyc > far * far) continue;
+            }
             const key = first.id + ':' + second.id;
+            // Early-out: both sleeping — keep prior contact, skip solver work
             if (first.isSleeping && second.isSleeping) {
               if (previousContacts.has(key)) this.contacts.set(key, [first, second]);
               continue;
             }
             const firstContact = this.collideVertices(first, second);
-            const secondContact = false;
-            if (firstContact || secondContact) { this.contacts.set(key, [first, second]); this.constrainPackingDistance(first, second); }
+            if (firstContact) { this.contacts.set(key, [first, second]); this.constrainPackingDistance(first, second); }
           }
         }
         for (const body of this.bodies) if (!body.isSleeping) this.constrainBoundaries(body, liquid);
@@ -600,14 +639,16 @@ class SoftWorld {
         }
         this.updateGeometry(body);
         if (body.area < body.targetArea * .75) this.restoreMinimumArea(body);
-        if (body.age > body.growthSeconds + 0.5 && body.hasSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / POINT_COUNT < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
+        if (body.age > body.growthSeconds + 0.5 && body.hasStableSupport && liquid < 0.01 && Math.abs(tilt) < 0.01 && body.impactExcitation < 0.012 && Math.hypot(body.vx, body.vy) < 5 && internalSpeedSquared / POINT_COUNT < 36 && Math.abs(body.area / body.targetArea - 1) < 0.035) body.stillSeconds += FIXED_STEP;
         else body.stillSeconds = 0;
         if (body.stillSeconds > 0.65) {
           body.isSleeping = true; body.vx = 0; body.vy = 0;
           for (const point of body.points) { point.vx = 0; point.vy = 0; }
         }
       }
-      this.diagnostics.sleepingBodies = this.bodies.filter(function (body) { return body.isSleeping; }).length;
+      var sleepingCount = 0;
+      for (var si = 0; si < this.bodies.length; si++) if (this.bodies[si].isSleeping) sleepingCount++;
+      this.diagnostics.sleepingBodies = sleepingCount;
       }
       if (this.accumulator > FIXED_STEP * 2) this.accumulator = 0;
     }

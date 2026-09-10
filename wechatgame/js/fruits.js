@@ -19,8 +19,11 @@ function getFruit(level) {
   return FRUITS[Math.max(0, Math.min(level, FRUITS.length - 1))];
 }
 
+/** 大西瓜（圆，level 6）为最终目标；不再合成西瓜角 */
+var MELON_LEVEL = 6;
+
 function nextLevel(level) {
-  if (level >= FRUITS.length - 1) return null;
+  if (level >= MELON_LEVEL) return null;
   return level + 1;
 }
 
@@ -179,6 +182,15 @@ function drawSoftFruit(ctx, body, def, images) {
   minX -= pad; minY -= pad; maxX += pad; maxY += pad;
   var w = Math.max(2, maxX - minX);
   var h = Math.max(2, maxY - minY);
+  var cx = body.x != null ? body.x : (minX + maxX) * 0.5;
+  var cy = body.y != null ? body.y : (minY + maxY) * 0.5;
+  var img = images && def.sprite ? images[def.sprite] : null;
+
+  // Sleeping: still clip once, but use currentRadius square (cheaper AABB side)
+  var sleeping = !!body.isSleeping;
+  var side = sleeping
+    ? Math.max(2, (body.currentRadius || def.radius) * 2.05)
+    : Math.max(w, h);
 
   ctx.save();
   ctx.beginPath();
@@ -189,36 +201,35 @@ function drawSoftFruit(ctx, body, def, images) {
   ctx.closePath();
   ctx.clip();
 
-  var img = images && def.sprite ? images[def.sprite] : null;
   if (img && img.width > 0 && img.height > 0) {
-    // Cover AABB with a square centered on centroid so deformation reads as squash
-    var side = Math.max(w, h);
-    var cx = body.x != null ? body.x : (minX + maxX) * 0.5;
-    var cy = body.y != null ? body.y : (minY + maxY) * 0.5;
     ctx.drawImage(img, cx - side * 0.5, cy - side * 0.5, side, side);
   } else {
     var r = body.currentRadius || def.radius;
-    var cx2 = body.x != null ? body.x : (minX + maxX) * 0.5;
-    var cy2 = body.y != null ? body.y : (minY + maxY) * 0.5;
-    var grd = ctx.createRadialGradient(cx2 - r * 0.3, cy2 - r * 0.35, r * 0.1, cx2, cy2, r);
-    grd.addColorStop(0, '#ffffffcc');
-    grd.addColorStop(0.35, def.color);
-    grd.addColorStop(1, def.stroke);
-    ctx.fillStyle = grd;
-    ctx.fill();
-    ctx.lineWidth = Math.max(1.5, r * 0.06);
-    ctx.strokeStyle = def.stroke;
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (var k = 1; k < points.length; k++) ctx.lineTo(points[k].x, points[k].y);
-    ctx.closePath();
-    ctx.stroke();
+    if (sleeping) {
+      ctx.fillStyle = def.color;
+      ctx.fill();
+    } else {
+      var grd = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+      grd.addColorStop(0, '#ffffffcc');
+      grd.addColorStop(0.35, def.color);
+      grd.addColorStop(1, def.stroke);
+      ctx.fillStyle = grd;
+      ctx.fill();
+      ctx.lineWidth = Math.max(1.5, r * 0.06);
+      ctx.strokeStyle = def.stroke;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (var k = 1; k < points.length; k++) ctx.lineTo(points[k].x, points[k].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
 
 module.exports = {
   FRUITS: FRUITS,
+  MELON_LEVEL: MELON_LEVEL,
   DROP_LEVEL_COUNT: DROP_LEVEL_COUNT,
   getFruit: getFruit,
   nextLevel: nextLevel,
