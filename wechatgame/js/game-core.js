@@ -254,6 +254,24 @@ Game.prototype._preloadImages = function () {
   });
 };
 
+function scheduleFrame(cb) {
+  if (typeof requestAnimationFrame === 'function') {
+    return requestAnimationFrame(cb);
+  }
+  // 微信小游戏部分环境无全局 rAF，退到 canvas / setTimeout
+  if (typeof wx !== 'undefined' && wx.createCanvas) {
+    try {
+      var c = scheduleFrame._c || (scheduleFrame._c = wx.createCanvas());
+      if (c && typeof c.requestAnimationFrame === 'function') {
+        return c.requestAnimationFrame(cb);
+      }
+    } catch (e) {}
+  }
+  return setTimeout(function () {
+    cb(nowMs());
+  }, 16);
+}
+
 Game.prototype.start = function () {
   if (this.running) return;
   this.running = true;
@@ -264,11 +282,15 @@ Game.prototype.start = function () {
     var t = typeof ts === 'number' ? ts : nowMs();
     var dt = Math.min(50, Math.max(0, t - self.lastTs));
     self.lastTs = t;
-    self._update(dt);
-    self._render();
-    requestAnimationFrame(loop);
+    try {
+      self._update(dt);
+      self._render();
+    } catch (err) {
+      console.error('[melt-melon] frame error', err);
+    }
+    scheduleFrame(loop);
   }
-  requestAnimationFrame(loop);
+  scheduleFrame(loop);
 };
 
 /**
@@ -809,13 +831,18 @@ Game.prototype._clampAimX = function (x) {
 };
 
 Game.prototype._roundRectPath = function (ctx, x, y, w, h, r) {
+  // 避免 arcTo：部分微信 Canvas 2D 不支持
   var rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.lineTo(x + w - rr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+  ctx.lineTo(x + w, y + h - rr);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+  ctx.lineTo(x + rr, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+  ctx.lineTo(x, y + rr);
+  ctx.quadraticCurveTo(x, y, x + rr, y);
   ctx.closePath();
 };
 
