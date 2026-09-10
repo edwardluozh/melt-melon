@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>软西瓜 Melt Melon</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="hud">
+        <div class="hud-row">
+          <div class="hud-block">
+            <span class="hud-label">得分</span>
+            <span id="score">0</span>
+          </div>
+          <div class="hud-block">
+            <span class="hud-label">最高</span>
+            <span id="highscore">0</span>
+          </div>
+          <div class="hud-block energy-block">
+            <span class="hud-label">能量</span>
+            <span id="energy">100</span>
+          </div>
+        </div>
+        <div class="hud-actions">
+          <button id="btn-soft" class="btn btn-disabled" disabled title="M2 软体">揉软一下</button>
+          <button id="btn-restart" class="btn btn-primary">重新开始</button>
+        </div>
+        <div class="next-preview">
+          <span class="hud-label">下一个</span>
+          <canvas id="next-canvas" width="56" height="56"></canvas>
+        </div>
+      </div>
+      <div id="game-wrap">
+        <canvas id="game"></canvas>
+        <div id="overlay" class="hidden">
+          <div class="overlay-card">
+            <h2>游戏结束</h2>
+            <p>本次得分：<strong id="final-score">0</strong></p>
+            <p>最高纪录：<strong id="final-high">0</strong></p>
+            <button id="btn-overlay-restart" class="btn btn-primary">再来一局</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
