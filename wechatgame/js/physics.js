@@ -1,5 +1,5 @@
 /**
- * Matter.js 引擎与墙体 / 水果刚体
+ * Matter.js 引擎与墙体 / 水果刚体（Q 弹）
  */
 var Matter = require('./matter.min.js');
 var fruits = require('./fruits.js');
@@ -11,9 +11,13 @@ var WALL_THICKNESS = 40;
 var FAIL_LINE_Y = 90;
 var DROP_Y = 52;
 
+var FIXED_DT = 1000 / 60;
+var MAX_SUBSTEPS = 3;
+
 function createEngine() {
   var engine = Matter.Engine.create({
-    gravity: { x: 0, y: 1.05, scale: 0.001 },
+    // 稍软重力，弹跳可读性更好
+    gravity: { x: 0, y: 0.92, scale: 0.001 },
   });
   engine.enableSleeping = true;
   return engine;
@@ -25,8 +29,8 @@ function createWalls(world) {
   var h = LOGICAL_H;
   var opts = {
     isStatic: true,
-    friction: 0.8,
-    restitution: 0.05,
+    friction: 0.25,
+    restitution: 0.2,
     label: 'wall',
   };
   var left = Matter.Bodies.rectangle(-t / 2, h / 2, t, h + t * 2, opts);
@@ -41,11 +45,11 @@ function createFruitBody(x, y, level, options) {
   var def = getFruit(level);
   var body = Matter.Bodies.circle(x, y, def.radius, {
     isStatic: options.isStatic || false,
-    restitution: 0.12,
-    friction: 0.35,
-    frictionAir: 0.01,
-    density: 0.002 + level * 0.00015,
-    sleepThreshold: 30,
+    restitution: 0.5,
+    friction: 0.2,
+    frictionAir: 0.012,
+    density: 0.002 + level * 0.00012,
+    sleepThreshold: 35,
     label: 'fruit-' + level,
   });
   body.plugin = {
@@ -54,6 +58,24 @@ function createFruitBody(x, y, level, options) {
     settledAtAbove: null,
   };
   return body;
+}
+
+/**
+ * Fixed-timestep Engine.update — silences Matter delta warnings and stabilizes bounce.
+ * Mutates accumulator object: { value: number }
+ */
+function fixedStep(engine, dtMs, accumulator) {
+  var acc = accumulator.value + dtMs;
+  var steps = 0;
+  while (acc >= FIXED_DT && steps < MAX_SUBSTEPS) {
+    Matter.Engine.update(engine, FIXED_DT);
+    acc -= FIXED_DT;
+    steps += 1;
+  }
+  // Drop excess to avoid spiral of death after long stalls
+  if (acc > FIXED_DT * 2) acc = 0;
+  accumulator.value = acc;
+  return steps;
 }
 
 function getFruitData(body) {
@@ -77,9 +99,12 @@ module.exports = {
   WALL_THICKNESS: WALL_THICKNESS,
   FAIL_LINE_Y: FAIL_LINE_Y,
   DROP_Y: DROP_Y,
+  FIXED_DT: FIXED_DT,
+  MAX_SUBSTEPS: MAX_SUBSTEPS,
   createEngine: createEngine,
   createWalls: createWalls,
   createFruitBody: createFruitBody,
+  fixedStep: fixedStep,
   getFruitData: getFruitData,
   isFruitBody: isFruitBody,
   fruitDefOf: fruitDefOf,

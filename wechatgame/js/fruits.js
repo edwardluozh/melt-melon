@@ -1,21 +1,19 @@
 /**
- * 水果定义与绘制（与浏览器 M1 一致）
+ * 水果定义与绘制（8 阶精灵）
  */
 
 var FRUITS = [
-  { level: 0, name: '葡萄', emoji: '🍇', radius: 14, color: '#b57edc', stroke: '#7a4aa8', score: 1 },
-  { level: 1, name: '樱桃', emoji: '🍒', radius: 18, color: '#ff6b81', stroke: '#c44569', score: 2 },
-  { level: 2, name: '橘子', emoji: '🍊', radius: 22, color: '#ffa502', stroke: '#e67e22', score: 4 },
-  { level: 3, name: '柠檬', emoji: '🍋', radius: 26, color: '#f7d060', stroke: '#d4a017', score: 8 },
-  { level: 4, name: '猕猴桃', emoji: '🥝', radius: 30, color: '#7bed9f', stroke: '#2ed573', score: 16 },
-  { level: 5, name: '番茄', emoji: '🍅', radius: 34, color: '#ff6348', stroke: '#e84118', score: 32 },
-  { level: 6, name: '桃', emoji: '🍑', radius: 40, color: '#ff9ff3', stroke: '#f368e0', score: 64 },
-  { level: 7, name: '菠萝', emoji: '🍍', radius: 46, color: '#eccc68', stroke: '#cca000', score: 128 },
-  { level: 8, name: '椰子', emoji: '🥥', radius: 54, color: '#dfe6e9', stroke: '#b2bec3', score: 256 },
-  { level: 9, name: '西瓜', emoji: '🍉', radius: 64, color: '#2ed573', stroke: '#1e9d4b', score: 512 },
+  { level: 0, name: '葡萄', emoji: '🍇', radius: 16, color: '#b57edc', stroke: '#7a4aa8', score: 1, sprite: 'images/fruit_0.png' },
+  { level: 1, name: '苹果', emoji: '🍎', radius: 22, color: '#ff6b81', stroke: '#c44569', score: 2, sprite: 'images/fruit_1.png' },
+  { level: 2, name: '橘子', emoji: '🍊', radius: 28, color: '#ffa502', stroke: '#e67e22', score: 4, sprite: 'images/fruit_2.png' },
+  { level: 3, name: '柠檬', emoji: '🍋', radius: 34, color: '#f7d060', stroke: '#d4a017', score: 8, sprite: 'images/fruit_3.png' },
+  { level: 4, name: '猕猴桃', emoji: '🥝', radius: 42, color: '#7bed9f', stroke: '#2ed573', score: 16, sprite: 'images/fruit_4.png' },
+  { level: 5, name: '桃', emoji: '🍑', radius: 50, color: '#ff9ff3', stroke: '#f368e0', score: 32, sprite: 'images/fruit_5.png' },
+  { level: 6, name: '西瓜圆', emoji: '🍉', radius: 60, color: '#2ed573', stroke: '#1e9d4b', score: 64, sprite: 'images/fruit_6.png' },
+  { level: 7, name: '西瓜角', emoji: '🍉', radius: 72, color: '#ff4757', stroke: '#c0392b', score: 128, sprite: 'images/fruit_7.png' },
 ];
 
-var DROP_LEVEL_COUNT = 5;
+var DROP_LEVEL_COUNT = 4;
 
 function getFruit(level) {
   return FRUITS[Math.max(0, Math.min(level, FRUITS.length - 1))];
@@ -30,9 +28,26 @@ function randomDropLevel() {
   return Math.floor(Math.random() * DROP_LEVEL_COUNT);
 }
 
-function drawFruit(ctx, x, y, def, scale) {
+/**
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} x
+ * @param {number} y
+ * @param {object} def
+ * @param {number} [scale]
+ * @param {Object.<string, Image>} [images] sprite path -> loaded image
+ */
+function drawFruit(ctx, x, y, def, scale, images) {
   scale = scale == null ? 1 : scale;
   var r = def.radius * scale;
+  var img = images && def.sprite ? images[def.sprite] : null;
+
+  if (img && img.width > 0 && img.height > 0) {
+    var size = r * 2;
+    ctx.drawImage(img, x - r, y - r, size, size);
+    return;
+  }
+
+  // fallback circle + emoji
   var grd = ctx.createRadialGradient(x - r * 0.3, y - r * 0.35, r * 0.1, x, y, r);
   grd.addColorStop(0, '#ffffffcc');
   grd.addColorStop(0.35, def.color);
@@ -53,6 +68,53 @@ function drawFruit(ctx, x, y, def, scale) {
   ctx.fillText(def.emoji, x, y + 1);
 }
 
+/**
+ * Preload fruit sprites via wx.createImage (or HTML Image fallback).
+ * Calls onDone(map) when all settle (loaded or errored).
+ */
+function preloadFruitImages(onDone) {
+  var map = {};
+  var left = FRUITS.length;
+  if (left === 0) {
+    if (onDone) onDone(map);
+    return map;
+  }
+
+  function settle() {
+    left -= 1;
+    if (left <= 0 && onDone) onDone(map);
+  }
+
+  for (var i = 0; i < FRUITS.length; i++) {
+    (function (def) {
+      var path = def.sprite;
+      var img;
+      try {
+        if (typeof wx !== 'undefined' && wx.createImage) {
+          img = wx.createImage();
+        } else if (typeof Image !== 'undefined') {
+          img = new Image();
+        }
+      } catch (e) {
+        img = null;
+      }
+      if (!img) {
+        settle();
+        return;
+      }
+      img.onload = function () {
+        map[path] = img;
+        settle();
+      };
+      img.onerror = function () {
+        settle();
+      };
+      img.src = path;
+    })(FRUITS[i]);
+  }
+  return map;
+}
+
 module.exports = {
   FRUITS: FRUITS,
   DROP_LEVEL_COUNT: DROP_LEVEL_COUNT,
@@ -60,4 +122,5 @@ module.exports = {
   nextLevel: nextLevel,
   randomDropLevel: randomDropLevel,
   drawFruit: drawFruit,
+  preloadFruitImages: preloadFruitImages,
 };
