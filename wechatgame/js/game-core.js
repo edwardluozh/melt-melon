@@ -203,13 +203,11 @@ function Game() {
   this.playScale = 1;
   this.playOffsetX = 0;
   this.playOffsetY = this.HUD_H;
-  this.hitSoft = { x: 0, y: 0, w: 0, h: 0 };
   this.hitRestart = { x: 0, y: 0, w: 0, h: 0 };
   this.hitDrop = { x: 0, y: 0, w: 0, h: 0 };
   this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
   this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.hitOverlayRestart = { x: 0, y: 0, w: 0, h: 0 };
-  this._debugTouch = { x: 0, y: 0, mode: 'idle' };
 
   this._layout();
   this._bindMerge();
@@ -248,61 +246,48 @@ Game.prototype.start = function () {
       self._render();
     } catch (err) {
       console.error('[melt-melon] frame error', err);
-      if (self._debugTouch) {
-        self._debugTouch.mode = 'ERR';
-      }
     }
   }, 16);
-
-  // 启动约 1 秒后自动落一颗，验证循环/物理是否在跑
-  setTimeout(function () {
-    if (!self.running || self.gameOver || !self.canDrop) return;
-    self._dropFruit();
-    if (self._debugTouch) self._debugTouch.mode = 'auto-drop';
-  }, 1000);
 };
 
 /**
  * Capsule-safe HUD layout:
- * - scores left on row1 below status / capsule
- * - next preview left of capsule (or under scores)
- * - buttons on second row fully below capsule
- * - HUD_H = buttons.bottom + 12
+ * Row 1 (below capsule): 得分 | 最高 | 能量 left; 下一个 left of capsule
+ * Row 2: ◀ ▶ + 投放 + 重新开始 (larger tap targets, more spacing)
  */
 Game.prototype._layout = function () {
   var mb = this.menuButton;
   var safeTop = this.safeTop || 0;
-  var topPad = mb ? mb.bottom + 10 : safeTop + 24;
+  var topPad = mb ? mb.bottom + 12 : safeTop + 28;
   this.topPad = topPad;
   this.scoresY = topPad;
 
-  var pad = 12;
-  var btnH = 34;
-  var softW = 84;
-  var restartW = 84;
-  var dropW = 72;
-  var nudgeW = 36;
-  var btnY = topPad + 44;
-  var leftPad = 14;
+  var pad = 14;
+  var btnH = 40;
+  var restartW = 92;
+  var dropW = 84;
+  var nudgeW = 42;
+  var gap = 10;
+  var row1H = 44;
+  var btnY = topPad + row1H + 12;
 
-  // Next preview: left of capsule at vertical center, else under scores
-  var previewR = 18;
+  // Next preview: left of capsule at vertical center when space allows
+  var previewR = 16;
   var nextX;
   var nextY;
-  if (mb && mb.left - previewR - 8 > leftPad + 200) {
-    nextX = mb.left - 36;
+  if (mb && mb.left - previewR - 10 > pad + 210) {
+    nextX = mb.left - 34;
     nextY = mb.top + mb.height / 2;
   } else {
-    nextX = leftPad + 48;
-    nextY = topPad + 52;
-    // If preview falls on button row, push buttons lower
+    // Sit on row1 right of energy columns, clear of capsule
+    nextX = mb ? Math.min(mb.left - 34, this.screenW - 40) : this.screenW - 48;
+    nextY = topPad + 22;
     if (nextY + previewR + 8 > btnY) {
-      btnY = nextY + previewR + 12;
+      btnY = nextY + previewR + 14;
     }
   }
   this.nextPreview = { x: nextX, y: nextY, r: previewR };
 
-  // Energy must end before capsule left
   this.energyMaxX = mb ? mb.left - 8 : this.screenW - 8;
   this.scoresMaxX = this.energyMaxX;
 
@@ -314,37 +299,34 @@ Game.prototype._layout = function () {
     h: btnH,
   };
   this.hitDrop = {
-    x: this.hitRestart.x - dropW - 8,
+    x: this.hitRestart.x - dropW - gap,
     y: btnY,
     w: dropW,
     h: btnH,
   };
-  this.hitSoft = {
-    x: this.hitDrop.x - softW - 8,
-    y: btnY,
-    w: softW,
-    h: btnH,
-  };
-  // Left/right nudge beside soft button when space allows
-  this.hitNudgeL = {
-    x: Math.max(pad, this.hitSoft.x - nudgeW * 2 - 12),
-    y: btnY,
-    w: nudgeW,
-    h: btnH,
-  };
-  this.hitNudgeR = {
-    x: this.hitNudgeL.x + nudgeW + 6,
-    y: btnY,
-    w: nudgeW,
-    h: btnH,
-  };
-  // Avoid overlap with soft if screen is narrow
-  if (this.hitNudgeR.x + this.hitNudgeR.w + 4 > this.hitSoft.x) {
+
+  // Compact nudge arrows left of primary drop when space allows
+  var nudgeRight = this.hitDrop.x - gap;
+  var nudgePairW = nudgeW * 2 + 8;
+  if (nudgeRight - nudgePairW >= pad) {
+    this.hitNudgeL = {
+      x: nudgeRight - nudgePairW,
+      y: btnY,
+      w: nudgeW,
+      h: btnH,
+    };
+    this.hitNudgeR = {
+      x: this.hitNudgeL.x + nudgeW + 8,
+      y: btnY,
+      w: nudgeW,
+      h: btnH,
+    };
+  } else {
     this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
     this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   }
 
-  this.HUD_H = btnY + btnH + 18;
+  this.HUD_H = btnY + btnH + 16;
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -432,13 +414,6 @@ Game.prototype._drainTouchQueue = function () {
       sx = sx / this.pixelRatio;
       sy = sy / this.pixelRatio;
     }
-    if (g.__meltTouchStat) {
-      this._debugTouch = {
-        x: Math.round(sx),
-        y: Math.round(sy),
-        mode: (ev.type || '?') + (ev.ok ? '' : '!'),
-      };
-    }
     if (ev.type === 'start') this._onTouchStart(sx, sy);
     else if (ev.type === 'move') this._onTouchMove(sx, sy);
     else if (ev.type === 'end') {
@@ -448,12 +423,6 @@ Game.prototype._drainTouchQueue = function () {
       this.pointerMode = 'cancelled';
       this.aiming = false;
     }
-  }
-  if (g.__meltTouchStat && g.__meltTouchStat.last) {
-    // 附带全局计数，确认入口层是否收到事件
-    var st = g.__meltTouchStat;
-    if (!this._debugTouch) this._debugTouch = { x: 0, y: 0, mode: 'idle' };
-    this._debugTouch.mode = (this._debugTouch.mode || 'idle') + ' #' + st.n;
   }
 };
 
@@ -474,14 +443,6 @@ Game.prototype._touchXY = function (e, fromChanged) {
     y = y / this.pixelRatio;
   }
   return { x: x, y: y };
-};
-
-Game.prototype._recordDebugTouch = function (sx, sy, mode) {
-  this._debugTouch = {
-    x: Math.round(sx || 0),
-    y: Math.round(sy || 0),
-    mode: mode || this.pointerMode || 'idle',
-  };
 };
 
 Game.prototype._nudgeAim = function (dir) {
@@ -581,16 +542,12 @@ Game.prototype._inDropZone = function (sx, sy) {
 };
 
 Game.prototype._onTouchStart = function (sx, sy) {
-  this._recordDebugTouch(sx, sy, this.pointerMode);
-
   if (this.gameOver && this._hitRect(this.hitOverlayRestart, sx, sy)) {
     this._restart();
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this._hitRect(this.hitRestart, sx, sy)) {
     this._restart();
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) {
@@ -599,26 +556,18 @@ Game.prototype._onTouchStart = function (sx, sy) {
     }
     this.pointerMode = 'idle';
     this.aiming = false;
-    this._recordDebugTouch(sx, sy, 'idle');
-    return;
-  }
-  if (this._hitRect(this.hitSoft, sx, sy)) {
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) {
     this._nudgeAim(-1);
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy)) {
     this._nudgeAim(1);
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
 
   if (this.gameOver || !this.canDrop) {
-    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
 
@@ -627,22 +576,23 @@ Game.prototype._onTouchStart = function (sx, sy) {
   this.pointerMode = 'aiming';
   this.aiming = true;
   this.aimX = this._clampAimX(p.x);
-  this._recordDebugTouch(sx, sy, 'aiming');
 };
 
 Game.prototype._onTouchMove = function (sx, sy) {
-  this._recordDebugTouch(sx, sy, this.pointerMode);
   if (this.pointerMode !== 'aiming' || this.gameOver) return;
-  // 仅明确命中 soft/restart 才取消；其余继续更新 aimX
-  if (this._hitRect(this.hitRestart, sx, sy) || this._hitRect(this.hitSoft, sx, sy)) {
+  // 命中 restart / drop / nudge 时取消瞄准
+  if (
+    this._hitRect(this.hitRestart, sx, sy) ||
+    (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) ||
+    (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) ||
+    (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy))
+  ) {
     this.pointerMode = 'cancelled';
     this.aiming = false;
-    this._recordDebugTouch(sx, sy, 'cancelled');
     return;
   }
   var p = this._toLogical(sx, sy);
   this.aimX = this._clampAimX(p.x);
-  this._recordDebugTouch(sx, sy, 'aiming');
 };
 
 Game.prototype._onTouchEnd = function () {
@@ -652,7 +602,6 @@ Game.prototype._onTouchEnd = function () {
   }
   this.pointerMode = 'idle';
   this.aiming = false;
-  if (this._debugTouch) this._debugTouch.mode = 'idle';
 };
 
 Game.prototype._dropFruit = function () {
@@ -781,7 +730,7 @@ Game.prototype._drawHUD = function (ctx) {
 
   ctx.fillStyle = 'rgba(255, 248, 242, 0.96)';
   ctx.fillRect(0, 0, sw, hudH);
-  ctx.strokeStyle = 'rgba(255, 150, 110, 0.4)';
+  ctx.strokeStyle = 'rgba(255, 150, 110, 0.35)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, hudH - 0.5);
@@ -791,36 +740,32 @@ Game.prototype._drawHUD = function (ctx) {
   var score = this.scoreMgr.score;
   var high = this.scoreMgr.highScore;
   var pad = 14;
+  var colGap = 78;
   var labelY = topPad;
   var valueY = topPad + 18;
 
-  // Scores left-aligned; energy must not run under capsule
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = '#9a6b4f';
   ctx.font = '12px sans-serif';
   ctx.fillText('得分', pad, labelY);
-  ctx.fillText('最高', pad + 86, labelY);
+  ctx.fillText('最高', pad + colGap, labelY);
 
-  var energyLabel = '能量';
-  var energyX = pad + 172;
-  // Keep energy column left of capsule
-  if (mb && energyX + 48 > mb.left - 8) {
-    energyX = Math.max(pad + 160, mb.left - 56);
-  }
-  if (!mb || energyX + 40 < mb.left - 8) {
-    ctx.fillText(energyLabel, energyX, labelY);
+  var energyX = pad + colGap * 2;
+  var energyOk = !mb || energyX + 48 < mb.left - 8;
+  if (energyOk) {
+    ctx.fillText('能量', energyX, labelY);
   }
 
   ctx.fillStyle = '#5a3d2b';
   ctx.font = 'bold 22px sans-serif';
   ctx.fillText(String(score), pad, valueY);
-  ctx.fillText(String(high), pad + 86, valueY);
-  if (!mb || energyX + 40 < mb.left - 8) {
+  ctx.fillText(String(high), pad + colGap, valueY);
+  if (energyOk) {
     ctx.fillText(String(this.energy), energyX, valueY);
   }
 
-  // Next preview
+  // Next preview (capsule-safe)
   var np = this.nextPreview;
   ctx.fillStyle = '#9a6b4f';
   ctx.font = '11px sans-serif';
@@ -835,23 +780,8 @@ Game.prototype._drawHUD = function (ctx) {
     this._drawButton(ctx, this.hitNudgeL, '◀', false);
     this._drawButton(ctx, this.hitNudgeR, '▶', false);
   }
-  this._drawButton(ctx, this.hitSoft, '揉软一下', true);
   this._drawPrimaryButton(ctx, this.hitDrop, '投放');
   this._drawButton(ctx, this.hitRestart, '重新开始', false);
-
-  // Debug: last touch
-  var dbg = this._debugTouch || { x: 0, y: 0, mode: 'idle' };
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillStyle = 'rgba(120, 90, 70, 0.55)';
-  ctx.font = '10px sans-serif';
-  var g = typeof GameGlobal !== 'undefined' ? GameGlobal : null;
-  var bridge = g && g.__meltTouchStat ? (' | ' + g.__meltTouchStat.last + ' n=' + g.__meltTouchStat.n) : '';
-  ctx.fillText(
-    'touch:' + dbg.x + ',' + dbg.y + ' mode:' + (dbg.mode || 'idle') + bridge,
-    10,
-    hudH - 14
-  );
 };
 
 Game.prototype._drawPrimaryButton = function (ctx, r, label) {
@@ -864,7 +794,7 @@ Game.prototype._drawPrimaryButton = function (ctx, r, label) {
   ctx.lineWidth = 1.5;
   ctx.stroke();
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px sans-serif';
+  ctx.font = 'bold 15px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
@@ -938,7 +868,7 @@ Game.prototype._drawPlayfield = function (ctx) {
     ctx.fillStyle = '#5a3d2b';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('拖动或点「投放」', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
+    ctx.fillText('拖动瞄准 · 松手投放', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
     ctx.globalAlpha = 1;
   }
 

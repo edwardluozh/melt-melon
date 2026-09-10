@@ -14,10 +14,10 @@ var DROP_Y = 52;
 var FIXED_DT = 1000 / 60;
 var MAX_SUBSTEPS = 3;
 
-/** Jelly spring toward identity each frame (higher = snappier) */
-var JELLY_SPRING_K = 0.12;
-/** Slight overshoot damping for Q感 */
-var JELLY_OVERSHOOT = 0.04;
+/** Jelly spring toward identity (lower = slower, more visible Q bounce) */
+var JELLY_SPRING_K = 0.075;
+/** Velocity damping — leaves light overshoot past 1.0 */
+var JELLY_DAMP = 0.82;
 
 function createEngine() {
   var engine = Matter.Engine.create({
@@ -50,7 +50,7 @@ function createFruitBody(x, y, level, options) {
   var def = getFruit(level);
   var body = Matter.Bodies.circle(x, y, def.radius, {
     isStatic: options.isStatic || false,
-    restitution: 0.55,
+    restitution: 0.6,
     friction: 0.2,
     frictionAir: 0.012,
     density: 0.002 + level * 0.00012,
@@ -61,7 +61,7 @@ function createFruitBody(x, y, level, options) {
     kind: 'fruit',
     level: level,
     settledAtAbove: null,
-    jelly: { sx: 1, sy: 1 },
+    jelly: { sx: 1, sy: 1, vx: 0, vy: 0 },
   };
   return body;
 }
@@ -78,11 +78,10 @@ function applyJellySquash(body, normal, speed) {
   var mag = Math.sqrt(normal.x * normal.x + normal.y * normal.y) || 1;
   var nx = Math.abs(normal.x / mag);
   var ny = Math.abs(normal.y / mag);
-  // Strength from impact speed (clamped)
-  var t = Math.max(0, Math.min(1, (speed - 0.8) / 8));
-  var compress = 0.9 - t * 0.15; // 0.75–0.9
-  var expand = 1.1 + t * 0.15; // 1.1–1.25
-  // Compress along dominant impact axis, expand perpendicular
+  // Strength from impact speed (clamped) → compress ~0.65–0.8, expand ~1.15–1.35
+  var t = Math.max(0, Math.min(1, (speed - 0.5) / 7));
+  var compress = 0.8 - t * 0.15;
+  var expand = 1.15 + t * 0.2;
   var sx;
   var sy;
   if (nx >= ny) {
@@ -92,12 +91,26 @@ function applyJellySquash(body, normal, speed) {
     sx = expand;
     sy = compress;
   }
-  // Take more extreme deformation if already squashing
   var cur = data.jelly;
+  // Reset spring velocity so the new squash reads clearly
+  cur.vx = 0;
+  cur.vy = 0;
   if (sx < 1) cur.sx = Math.min(cur.sx, sx);
   else cur.sx = Math.max(cur.sx, sx);
   if (sy < 1) cur.sy = Math.min(cur.sy, sy);
   else cur.sy = Math.max(cur.sy, sy);
+}
+
+/** Tiny overall scale pulse (e.g. merge spawn pop). */
+function pulseJelly(body, amount) {
+  var data = getFruitData(body);
+  if (!data || !data.jelly) return;
+  var a = amount == null ? 0.12 : amount;
+  var j = data.jelly;
+  j.sx = Math.min(1.4, j.sx * (1 + a));
+  j.sy = Math.min(1.4, j.sy * (1 + a));
+  j.vx = 0;
+  j.vy = 0;
 }
 
 /** Spring jelly scales toward 1 with light overshoot (call each frame). */
@@ -105,15 +118,26 @@ function updateJelly(body) {
   var data = getFruitData(body);
   if (!data || !data.jelly) return;
   var j = data.jelly;
+  if (j.vx == null) j.vx = 0;
+  if (j.vy == null) j.vy = 0;
   var k = JELLY_SPRING_K;
-  j.sx += (1 - j.sx) * k;
-  j.sy += (1 - j.sy) * k;
-  // Soft clamp near identity to avoid endless micro-jitter
-  if (Math.abs(j.sx - 1) < 0.002) j.sx = 1;
-  if (Math.abs(j.sy - 1) < 0.002) j.sy = 1;
-  // Optional tiny overshoot when recovering from deep squash
-  if (j.sx < 0.95) j.sx -= JELLY_OVERSHOOT * (0.95 - j.sx);
-  if (j.sy > 1.05) j.sy += JELLY_OVERSHOOT * (j.sy - 1.05) * 0.15;
+  var damp = JELLY_DAMP;
+  j.vx = (j.vx + (1 - j.sx) * k) * damp;
+  j.vy = (j.vy + (1 - j.sy) * k) * damp;
+  j.sx += j.vx;
+  j.sy += j.vy;
+  // Soft settle near identity
+  if (Math.abs(j.sx - 1) < 0.003 && Math.abs(j.vx) < 0.001) {
+    j.sx = 1;
+    j.vx = 0;
+  }
+  if (Math.abs(j.sy - 1) < 0.003 && Math.abs(j.vy) < 0.001) {
+    j.sy = 1;
+    j.vy = 0;
+  }
+  // Stability clamps
+  j.sx = Math.max(0.55, Math.min(1.45, j.sx));
+  j.sy = Math.max(0.55, Math.min(1.45, j.sy));
 }
 
 /**
@@ -166,6 +190,7 @@ module.exports = {
   createWalls: createWalls,
   createFruitBody: createFruitBody,
   applyJellySquash: applyJellySquash,
+  pulseJelly: pulseJelly,
   updateJelly: updateJelly,
   fixedStep: fixedStep,
   getFruitData: getFruitData,

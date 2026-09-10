@@ -42,8 +42,9 @@ function attachMergeHandler(engine, onMerge, isActive) {
       Matter.World.remove(engine.world, b);
 
       var spawned = physics.createFruitBody(midX, midY, next);
-      // Spawn with vertical squash (pop-in Q感)
-      physics.applyJellySquash(spawned, { x: 0, y: 1 }, 5);
+      // Spawn with vertical squash + tiny scale pulse (pop-in Q感)
+      physics.applyJellySquash(spawned, { x: 0, y: 1 }, 7);
+      if (physics.pulseJelly) physics.pulseJelly(spawned, 0.1);
       Matter.Body.setVelocity(spawned, {
         x: (a.velocity.x + b.velocity.x) * 0.25,
         y: Math.min(0, (a.velocity.y + b.velocity.y) * 0.25) - 1.5,
