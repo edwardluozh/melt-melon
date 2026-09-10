@@ -29,15 +29,50 @@ function randomDropLevel() {
 }
 
 /**
+ * Draw fruit at (x,y). Optional xform: { sx, sy, angle } for jelly + rotation.
+ * When xform provided, draws centered at origin after translate/rotate/scale.
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} x
  * @param {number} y
  * @param {object} def
  * @param {number} [scale]
- * @param {Object.<string, Image>} [images] sprite path -> loaded image
+ * @param {Object.<string, Image>} [images]
+ * @param {{sx?:number,sy?:number,angle?:number}} [xform]
  */
-function drawFruit(ctx, x, y, def, scale, images) {
+function drawFruit(ctx, x, y, def, scale, images, xform) {
   scale = scale == null ? 1 : scale;
+  var sx = (xform && xform.sx != null) ? xform.sx : 1;
+  var sy = (xform && xform.sy != null) ? xform.sy : 1;
+  var angle = (xform && xform.angle != null) ? xform.angle : 0;
+  var useXform = xform && (sx !== 1 || sy !== 1 || angle !== 0);
+
+  if (useXform) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (angle) ctx.rotate(angle);
+    ctx.scale(sx, sy);
+    _drawFruitAtOrigin(ctx, def, scale, images);
+    ctx.restore();
+    return;
+  }
+
+  _drawFruitCentered(ctx, x, y, def, scale, images);
+}
+
+/** Jelly-aware draw helper (explicit API). */
+function drawFruitJelly(ctx, x, y, def, scale, images, sx, sy, angle) {
+  drawFruit(ctx, x, y, def, scale, images, {
+    sx: sx == null ? 1 : sx,
+    sy: sy == null ? 1 : sy,
+    angle: angle || 0,
+  });
+}
+
+function _drawFruitAtOrigin(ctx, def, scale, images) {
+  _drawFruitCentered(ctx, 0, 0, def, scale, images);
+}
+
+function _drawFruitCentered(ctx, x, y, def, scale, images) {
   var r = def.radius * scale;
   var img = images && def.sprite ? images[def.sprite] : null;
 
@@ -122,5 +157,6 @@ module.exports = {
   nextLevel: nextLevel,
   randomDropLevel: randomDropLevel,
   drawFruit: drawFruit,
+  drawFruitJelly: drawFruitJelly,
   preloadFruitImages: preloadFruitImages,
 };

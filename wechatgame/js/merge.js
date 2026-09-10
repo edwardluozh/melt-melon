@@ -29,6 +29,10 @@ function attachMergeHandler(engine, onMerge, isActive) {
       processing[a.id] = true;
       processing[b.id] = true;
 
+      // Brief squash on merging pair before remove (visual flash if still drawn)
+      physics.applyJellySquash(a, { x: 0, y: 1 }, 6);
+      physics.applyJellySquash(b, { x: 0, y: 1 }, 6);
+
       var midX = (a.position.x + b.position.x) / 2;
       var midY = (a.position.y + b.position.y) / 2;
       var fromLevel = da.level;
@@ -38,6 +42,8 @@ function attachMergeHandler(engine, onMerge, isActive) {
       Matter.World.remove(engine.world, b);
 
       var spawned = physics.createFruitBody(midX, midY, next);
+      // Spawn with vertical squash (pop-in Q感)
+      physics.applyJellySquash(spawned, { x: 0, y: 1 }, 5);
       Matter.Body.setVelocity(spawned, {
         x: (a.velocity.x + b.velocity.x) * 0.25,
         y: Math.min(0, (a.velocity.y + b.velocity.y) * 0.25) - 1.5,

@@ -24,16 +24,22 @@ var createWalls = physics.createWalls;
 var createFruitBody = physics.createFruitBody;
 var getFruitData = physics.getFruitData;
 var isFruitBody = physics.isFruitBody;
+var isWallBody = physics.isWallBody;
 var fixedStep = physics.fixedStep;
+var applyJellySquash = physics.applyJellySquash;
+var updateJelly = physics.updateJelly;
 var attachMergeHandler = merge.attachMergeHandler;
 var ScoreManager = scoreMod.ScoreManager;
 
 var DROP_COOLDOWN_MS = 450;
 var FAIL_HOLD_MS = 3000;
-/** Base HUD content height; actual HUD_H includes safe-area top inset */
-var HUD_CONTENT_H = 128;
 var ENERGY_DEFAULT = 100;
 var PLAY_BOTTOM_PAD = 8;
+
+/** Never retry getSystemInfoSync after a failure (jsbridge not ready spam). */
+var neverRetrySysInfo = false;
+var sysInfoCached = null;
+var sysInfoTried = false;
 
 function nowMs() {
   return typeof performance !== 'undefined' && performance.now
@@ -41,36 +47,109 @@ function nowMs() {
     : Date.now();
 }
 
-function readSystemMetrics(canvas) {
-  var pixelRatio = 2;
-  var screenW = 375;
-  var screenH = 667;
-  var safeTop = 0;
-  var safeBottom = 0;
+function readMenuButton() {
+  try {
+    if (typeof wx !== 'undefined' && typeof wx.getMenuButtonBoundingClientRect === 'function') {
+      var r = wx.getMenuButtonBoundingClientRect();
+      if (r && r.width > 0 && r.height > 0) {
+        return {
+          left: r.left,
+          right: r.right,
+          top: r.top,
+          bottom: r.bottom,
+          width: r.width,
+          height: r.height,
+        };
+      }
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  return null;
+}
 
+function readWindowInfoSafe() {
+  try {
+    if (typeof wx !== 'undefined' && typeof wx.getWindowInfo === 'function') {
+      var info = wx.getWindowInfo();
+      if (info) return info;
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  return null;
+}
+
+function readSystemInfoOnce() {
+  if (neverRetrySysInfo || sysInfoTried) return sysInfoCached;
+  sysInfoTried = true;
   try {
     if (typeof wx !== 'undefined' && wx.getSystemInfoSync) {
       var sys = wx.getSystemInfoSync();
       if (sys) {
-        if (sys.pixelRatio > 0) pixelRatio = sys.pixelRatio;
-        if (sys.windowWidth > 0) screenW = sys.windowWidth;
-        if (sys.windowHeight > 0) screenH = sys.windowHeight;
-        else if (sys.screenHeight > 0) screenH = sys.screenHeight;
-        if (sys.safeArea && typeof sys.safeArea.top === 'number') {
-          safeTop = Math.max(0, sys.safeArea.top);
-        } else if (typeof sys.statusBarHeight === 'number') {
-          safeTop = Math.max(0, sys.statusBarHeight);
-        }
-        if (sys.safeArea && typeof sys.safeArea.bottom === 'number' && sys.screenHeight > 0) {
-          safeBottom = Math.max(0, sys.screenHeight - sys.safeArea.bottom);
-        }
+        sysInfoCached = sys;
+        return sys;
       }
     }
   } catch (e) {
-    /* jsbridge not ready — fall through to canvas */
+    neverRetrySysInfo = true;
+    sysInfoCached = null;
+  }
+  return null;
+}
+
+/**
+ * Prefer canvas size + menuButton + getWindowInfo; getSystemInfoSync only once.
+ */
+function readSystemMetrics(canvas) {
+  var pixelRatio = 2;
+  var screenW = 0;
+  var screenH = 0;
+  var safeTop = 0;
+  var safeBottom = 0;
+  var menuButton = readMenuButton();
+
+  // 1) getWindowInfo if available (no legacy bridge spam)
+  var win = readWindowInfoSafe();
+  if (win) {
+    if (win.pixelRatio > 0) pixelRatio = win.pixelRatio;
+    if (win.windowWidth > 0) screenW = win.windowWidth;
+    if (win.windowHeight > 0) screenH = win.windowHeight;
+    if (win.safeArea && typeof win.safeArea.top === 'number') {
+      safeTop = Math.max(0, win.safeArea.top);
+    } else if (typeof win.statusBarHeight === 'number') {
+      safeTop = Math.max(0, win.statusBarHeight);
+    }
+    if (win.safeArea && typeof win.safeArea.bottom === 'number' && win.screenHeight > 0) {
+      safeBottom = Math.max(0, win.screenHeight - win.safeArea.bottom);
+    }
   }
 
-  // Prefer canvas buffer size when system info was zero / missing
+  // 2) Optional one-shot getSystemInfoSync only if still missing metrics
+  if ((!screenW || !screenH) && !neverRetrySysInfo) {
+    var sys = readSystemInfoOnce();
+    if (sys) {
+      if (sys.pixelRatio > 0) pixelRatio = sys.pixelRatio;
+      if (sys.windowWidth > 0) screenW = sys.windowWidth;
+      if (sys.windowHeight > 0) screenH = sys.windowHeight;
+      else if (sys.screenHeight > 0) screenH = sys.screenHeight;
+      if (sys.safeArea && typeof sys.safeArea.top === 'number') {
+        safeTop = Math.max(0, sys.safeArea.top);
+      } else if (typeof sys.statusBarHeight === 'number') {
+        safeTop = Math.max(0, sys.statusBarHeight);
+      }
+      if (sys.safeArea && typeof sys.safeArea.bottom === 'number' && sys.screenHeight > 0) {
+        safeBottom = Math.max(0, sys.screenHeight - sys.safeArea.bottom);
+      }
+    }
+  }
+
+  // Infer safeTop from menu button when status bar unknown
+  if (safeTop <= 0 && menuButton && menuButton.top > 0) {
+    safeTop = Math.max(0, menuButton.top);
+  }
+
+  // 3) Prefer canvas buffer size when system info was zero / missing
   if (canvas) {
     var cw = canvas.width || 0;
     var ch = canvas.height || 0;
@@ -80,7 +159,6 @@ function readSystemMetrics(canvas) {
     if ((!screenH || screenH <= 0) && ch > 0) {
       screenH = Math.round(ch / pixelRatio) || ch;
     }
-    // If canvas already sized in CSS pixels (some runtimes), trust it when sys failed
     if (cw > 0 && ch > 0 && (screenW <= 0 || screenH <= 0)) {
       screenW = cw;
       screenH = ch;
@@ -98,6 +176,7 @@ function readSystemMetrics(canvas) {
     screenH: screenH,
     safeTop: safeTop,
     safeBottom: safeBottom,
+    menuButton: menuButton,
   };
 }
 
@@ -111,21 +190,21 @@ function Game() {
   this.screenH = metrics.screenH;
   this.safeTop = metrics.safeTop;
   this.safeBottom = metrics.safeBottom;
-  this.HUD_H = HUD_CONTENT_H + this.safeTop;
+  this.menuButton = metrics.menuButton;
 
   // Buffer = CSS * dpr；绘制用 setTransform(dpr) 后走屏幕坐标
   this.canvas.width = Math.max(1, Math.floor(this.screenW * this.pixelRatio));
   this.canvas.height = Math.max(1, Math.floor(this.screenH * this.pixelRatio));
 
-  // Re-read if createCanvas populated size and sys had been empty
-  if (this.screenW <= 0 || this.screenH <= 0) {
+  // Re-read if createCanvas populated size and earlier metrics were defaults
+  if (this.canvas.width > 0 && this.canvas.height > 0) {
     metrics = readSystemMetrics(this.canvas);
     this.pixelRatio = metrics.pixelRatio;
     this.screenW = metrics.screenW;
     this.screenH = metrics.screenH;
     this.safeTop = metrics.safeTop;
     this.safeBottom = metrics.safeBottom;
-    this.HUD_H = HUD_CONTENT_H + this.safeTop;
+    this.menuButton = metrics.menuButton;
     this.canvas.width = Math.max(1, Math.floor(this.screenW * this.pixelRatio));
     this.canvas.height = Math.max(1, Math.floor(this.screenH * this.pixelRatio));
   }
@@ -149,6 +228,11 @@ function Game() {
 
   this.fruitImages = {};
 
+  // Layout rects (filled by _layout)
+  this.topPad = 0;
+  this.scoresY = 0;
+  this.nextPreview = { x: 0, y: 0 };
+  this.HUD_H = 128;
   this.playScale = 1;
   this.playOffsetX = 0;
   this.playOffsetY = this.HUD_H;
@@ -158,6 +242,7 @@ function Game() {
 
   this._layout();
   this._bindMerge();
+  this._bindJelly();
   this._bindTouch();
   this._preloadImages();
 }
@@ -186,23 +271,48 @@ Game.prototype.start = function () {
   requestAnimationFrame(loop);
 };
 
+/**
+ * Capsule-safe HUD layout:
+ * - scores left on row1 below status / capsule
+ * - next preview left of capsule (or under scores)
+ * - buttons on second row fully below capsule
+ * - HUD_H = buttons.bottom + 12
+ */
 Game.prototype._layout = function () {
-  var hudH = this.HUD_H;
-  var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
-  var availW = this.screenW;
-  var availH = Math.max(120, this.screenH - hudH - bottomPad);
-  // Fit playfield fully (including bottom wall) into available area
-  var fit = Math.min(availW / LOGICAL_W, availH / LOGICAL_H);
-  this.playScale = fit;
-  this.playOffsetX = (availW - LOGICAL_W * fit) / 2;
-  // Prefer top-align under HUD so bottom wall stays visible; small leftover goes below
-  this.playOffsetY = hudH + Math.max(0, (availH - LOGICAL_H * fit) / 2);
+  var mb = this.menuButton;
+  var safeTop = this.safeTop || 0;
+  var topPad = mb ? mb.bottom + 10 : safeTop + 24;
+  this.topPad = topPad;
+  this.scoresY = topPad;
 
   var pad = 12;
   var btnH = 34;
   var softW = 92;
   var restartW = 92;
-  var btnY = this.safeTop + 72;
+  var btnY = topPad + 44;
+  var leftPad = 14;
+
+  // Next preview: left of capsule at vertical center, else under scores
+  var previewR = 18;
+  var nextX;
+  var nextY;
+  if (mb && mb.left - previewR - 8 > leftPad + 200) {
+    nextX = mb.left - 36;
+    nextY = mb.top + mb.height / 2;
+  } else {
+    nextX = leftPad + 48;
+    nextY = topPad + 52;
+    // If preview falls on button row, push buttons lower
+    if (nextY + previewR + 8 > btnY) {
+      btnY = nextY + previewR + 12;
+    }
+  }
+  this.nextPreview = { x: nextX, y: nextY, r: previewR };
+
+  // Energy must end before capsule left
+  this.energyMaxX = mb ? mb.left - 8 : this.screenW - 8;
+  this.scoresMaxX = this.energyMaxX;
+
   var right = this.screenW - pad;
   this.hitRestart = {
     x: right - restartW,
@@ -216,6 +326,17 @@ Game.prototype._layout = function () {
     w: softW,
     h: btnH,
   };
+
+  this.HUD_H = btnY + btnH + 12;
+
+  var hudH = this.HUD_H;
+  var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
+  var availW = this.screenW;
+  var availH = Math.max(120, this.screenH - hudH - bottomPad);
+  var fit = Math.min(availW / LOGICAL_W, availH / LOGICAL_H);
+  this.playScale = fit;
+  this.playOffsetX = (availW - LOGICAL_W * fit) / 2;
+  this.playOffsetY = hudH + Math.max(0, (availH - LOGICAL_H * fit) / 2);
 };
 
 Game.prototype._bindMerge = function () {
@@ -235,6 +356,49 @@ Game.prototype._bindMerge = function () {
       return !self.gameOver;
     }
   );
+};
+
+Game.prototype._bindJelly = function () {
+  var engine = this.engine;
+  Matter.Events.on(engine, 'collisionStart', function (event) {
+    var pairs = event.pairs;
+    for (var i = 0; i < pairs.length; i++) {
+      var pair = pairs[i];
+      var a = pair.bodyA;
+      var b = pair.bodyB;
+      var aFruit = isFruitBody(a);
+      var bFruit = isFruitBody(b);
+      if (!aFruit && !bFruit) continue;
+      // fruit-fruit or fruit-wall
+      if (!(aFruit && bFruit) && !(aFruit && isWallBody(b)) && !(bFruit && isWallBody(a))) {
+        continue;
+      }
+
+      var nx = 0;
+      var ny = 1;
+      if (pair.collision && pair.collision.normal) {
+        nx = pair.collision.normal.x;
+        ny = pair.collision.normal.y;
+      } else {
+        var dx = b.position.x - a.position.x;
+        var dy = b.position.y - a.position.y;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        nx = dx / len;
+        ny = dy / len;
+      }
+
+      var rvx = (a.velocity ? a.velocity.x : 0) - (b.velocity ? b.velocity.x : 0);
+      var rvy = (a.velocity ? a.velocity.y : 0) - (b.velocity ? b.velocity.y : 0);
+      var speed = Math.sqrt(rvx * rvx + rvy * rvy);
+
+      if (aFruit) {
+        applyJellySquash(a, { x: -nx, y: -ny }, speed);
+      }
+      if (bFruit) {
+        applyJellySquash(b, { x: nx, y: ny }, speed);
+      }
+    }
+  });
 };
 
 Game.prototype._bindTouch = function () {
@@ -349,9 +513,14 @@ Game.prototype._restart = function () {
 Game.prototype._update = function (dt) {
   fixedStep(this.engine, dt, this.physAccum);
 
-  for (var i = 0; i < this.floatTexts.length; i++) {
-    this.floatTexts[i].life -= dt;
-    this.floatTexts[i].y -= dt * 0.04;
+  var bodies = this.engine.world.bodies;
+  for (var i = 0; i < bodies.length; i++) {
+    if (isFruitBody(bodies[i])) updateJelly(bodies[i]);
+  }
+
+  for (var j = 0; j < this.floatTexts.length; j++) {
+    this.floatTexts[j].life -= dt;
+    this.floatTexts[j].y -= dt * 0.04;
   }
   this.floatTexts = this.floatTexts.filter(function (f) {
     return f.life > 0;
@@ -419,7 +588,8 @@ Game.prototype._render = function () {
 Game.prototype._drawHUD = function (ctx) {
   var sw = this.screenW;
   var hudH = this.HUD_H;
-  var top = this.safeTop;
+  var topPad = this.topPad;
+  var mb = this.menuButton;
 
   ctx.fillStyle = 'rgba(255, 248, 242, 0.96)';
   ctx.fillRect(0, 0, sw, hudH);
@@ -433,32 +603,45 @@ Game.prototype._drawHUD = function (ctx) {
   var score = this.scoreMgr.score;
   var high = this.scoreMgr.highScore;
   var pad = 14;
-  var labelY = top + 12;
-  var valueY = top + 30;
+  var labelY = topPad;
+  var valueY = topPad + 18;
 
+  // Scores left-aligned; energy must not run under capsule
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillStyle = '#9a6b4f';
   ctx.font = '12px sans-serif';
   ctx.fillText('得分', pad, labelY);
   ctx.fillText('最高', pad + 86, labelY);
-  ctx.fillText('能量', pad + 172, labelY);
+
+  var energyLabel = '能量';
+  var energyX = pad + 172;
+  // Keep energy column left of capsule
+  if (mb && energyX + 48 > mb.left - 8) {
+    energyX = Math.max(pad + 160, mb.left - 56);
+  }
+  if (!mb || energyX + 40 < mb.left - 8) {
+    ctx.fillText(energyLabel, energyX, labelY);
+  }
 
   ctx.fillStyle = '#5a3d2b';
   ctx.font = 'bold 22px sans-serif';
   ctx.fillText(String(score), pad, valueY);
   ctx.fillText(String(high), pad + 86, valueY);
-  ctx.fillText(String(this.energy), pad + 172, valueY);
+  if (!mb || energyX + 40 < mb.left - 8) {
+    ctx.fillText(String(this.energy), energyX, valueY);
+  }
 
-  var nextX = sw - 58;
-  var nextY = top + 10;
+  // Next preview
+  var np = this.nextPreview;
   ctx.fillStyle = '#9a6b4f';
-  ctx.font = '12px sans-serif';
+  ctx.font = '11px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('下一个', nextX, nextY);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('下一个', np.x, np.y - np.r - 2);
   var def = getFruit(this.nextLevel);
-  var previewScale = Math.min(1, 20 / def.radius);
-  drawFruit(ctx, nextX, nextY + 42, def, previewScale, this.fruitImages);
+  var previewScale = Math.min(1, np.r / def.radius);
+  drawFruit(ctx, np.x, np.y, def, previewScale, this.fruitImages);
 
   this._drawButton(ctx, this.hitSoft, '揉软一下', true);
   this._drawButton(ctx, this.hitRestart, '重新开始', false);
@@ -542,15 +725,16 @@ Game.prototype._drawPlayfield = function (ctx) {
     var data = getFruitData(body);
     if (!data) continue;
     var def = getFruit(data.level);
-    ctx.save();
-    ctx.translate(body.position.x, body.position.y);
-    ctx.rotate(body.angle);
-    drawFruit(ctx, 0, 0, def, 1, images);
-    ctx.restore();
+    var j = data.jelly || { sx: 1, sy: 1 };
+    drawFruit(ctx, body.position.x, body.position.y, def, 1, images, {
+      sx: j.sx,
+      sy: j.sy,
+      angle: body.angle,
+    });
   }
 
-  for (var j = 0; j < this.floatTexts.length; j++) {
-    var ft = this.floatTexts[j];
+  for (var k = 0; k < this.floatTexts.length; k++) {
+    var ft = this.floatTexts[k];
     ctx.globalAlpha = Math.max(0, ft.life / 700);
     ctx.fillStyle = '#e85d04';
     ctx.font = 'bold 18px sans-serif';
