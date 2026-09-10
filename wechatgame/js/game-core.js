@@ -205,7 +205,11 @@ function Game() {
   this.playOffsetY = this.HUD_H;
   this.hitSoft = { x: 0, y: 0, w: 0, h: 0 };
   this.hitRestart = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitDrop = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
+  this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
   this.hitOverlayRestart = { x: 0, y: 0, w: 0, h: 0 };
+  this._debugTouch = { x: 0, y: 0, mode: 'idle' };
 
   this._layout();
   this._bindMerge();
@@ -225,15 +229,7 @@ function scheduleFrame(cb) {
   if (typeof requestAnimationFrame === 'function') {
     return requestAnimationFrame(cb);
   }
-  // 微信小游戏部分环境无全局 rAF，退到 canvas / setTimeout
-  if (typeof wx !== 'undefined' && wx.createCanvas) {
-    try {
-      var c = scheduleFrame._c || (scheduleFrame._c = wx.createCanvas());
-      if (c && typeof c.requestAnimationFrame === 'function') {
-        return c.requestAnimationFrame(cb);
-      }
-    } catch (e) {}
-  }
+  // 勿再 wx.createCanvas()：第二块 canvas 会干扰小游戏运行时
   return setTimeout(function () {
     cb(nowMs());
   }, 16);
@@ -276,8 +272,10 @@ Game.prototype._layout = function () {
 
   var pad = 12;
   var btnH = 34;
-  var softW = 92;
-  var restartW = 92;
+  var softW = 84;
+  var restartW = 84;
+  var dropW = 72;
+  var nudgeW = 36;
   var btnY = topPad + 44;
   var leftPad = 14;
 
@@ -309,14 +307,38 @@ Game.prototype._layout = function () {
     w: restartW,
     h: btnH,
   };
+  this.hitDrop = {
+    x: this.hitRestart.x - dropW - 8,
+    y: btnY,
+    w: dropW,
+    h: btnH,
+  };
   this.hitSoft = {
-    x: this.hitRestart.x - softW - 8,
+    x: this.hitDrop.x - softW - 8,
     y: btnY,
     w: softW,
     h: btnH,
   };
+  // Left/right nudge beside soft button when space allows
+  this.hitNudgeL = {
+    x: Math.max(pad, this.hitSoft.x - nudgeW * 2 - 12),
+    y: btnY,
+    w: nudgeW,
+    h: btnH,
+  };
+  this.hitNudgeR = {
+    x: this.hitNudgeL.x + nudgeW + 6,
+    y: btnY,
+    w: nudgeW,
+    h: btnH,
+  };
+  // Avoid overlap with soft if screen is narrow
+  if (this.hitNudgeR.x + this.hitNudgeR.w + 4 > this.hitSoft.x) {
+    this.hitNudgeL = { x: 0, y: 0, w: 0, h: 0 };
+    this.hitNudgeR = { x: 0, y: 0, w: 0, h: 0 };
+  }
 
-  this.HUD_H = btnY + btnH + 12;
+  this.HUD_H = btnY + btnH + 18;
 
   var hudH = this.HUD_H;
   var bottomPad = Math.max(PLAY_BOTTOM_PAD, this.safeBottom || 0);
@@ -395,17 +417,32 @@ Game.prototype._touchXY = function (e, fromChanged) {
     ? e.changedTouches || e.touches
     : e.touches || e.changedTouches;
   var t = list && list[0];
+  // 也可能是鼠标事件本身（无 touches）
+  if (!t && e && (e.x != null || e.clientX != null)) t = e;
   if (!t) return null;
-  // 微信小游戏优先用 x/y；模拟器鼠标也可能给 clientX
   var x = t.x != null ? t.x : t.clientX;
   var y = t.y != null ? t.y : t.clientY;
   if (x == null || y == null) return null;
   // 若坐标像物理像素，缩回 CSS 像素
-  if (this.pixelRatio > 1.1 && x > this.screenW * 1.25) {
+  if (this.pixelRatio > 1 && x > this.screenW * 1.2) {
     x = x / this.pixelRatio;
     y = y / this.pixelRatio;
   }
   return { x: x, y: y };
+};
+
+Game.prototype._recordDebugTouch = function (sx, sy, mode) {
+  this._debugTouch = {
+    x: Math.round(sx || 0),
+    y: Math.round(sy || 0),
+    mode: mode || this.pointerMode || 'idle',
+  };
+};
+
+Game.prototype._nudgeAim = function (dir) {
+  if (this.gameOver || !this.canDrop) return;
+  var step = 28;
+  this.aimX = this._clampAimX(this.aimX + dir * step);
 };
 
 Game.prototype._bindTouch = function () {
@@ -448,10 +485,21 @@ Game.prototype._bindTouch = function () {
     c.addEventListener('touchmove', onMove, false);
     c.addEventListener('touchend', onEnd, false);
     c.addEventListener('touchcancel', onCancel, false);
+    function mouseXY(ev) {
+      var x = ev.clientX != null ? ev.clientX : ev.x;
+      var y = ev.clientY != null ? ev.clientY : ev.y;
+      if (x == null || y == null) return null;
+      if (self.pixelRatio > 1 && x > self.screenW * 1.2) {
+        x = x / self.pixelRatio;
+        y = y / self.pixelRatio;
+      }
+      return { x: x, y: y };
+    }
     c.addEventListener(
       'mousedown',
       function (ev) {
-        self._onTouchStart(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+        var p = mouseXY(ev);
+        if (p) self._onTouchStart(p.x, p.y);
       },
       false
     );
@@ -459,15 +507,17 @@ Game.prototype._bindTouch = function () {
       'mousemove',
       function (ev) {
         if (self.pointerMode !== 'aiming') return;
-        self._onTouchMove(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+        var p = mouseXY(ev);
+        if (p) self._onTouchMove(p.x, p.y);
       },
       false
     );
     c.addEventListener(
       'mouseup',
       function (ev) {
-        if (self.pointerMode === 'aiming') {
-          self._onTouchMove(ev.clientX != null ? ev.clientX : ev.x, ev.clientY != null ? ev.clientY : ev.y);
+        var p = mouseXY(ev);
+        if (p && self.pointerMode === 'aiming') {
+          self._onTouchMove(p.x, p.y);
         }
         self._onTouchEnd();
       },
@@ -486,44 +536,78 @@ Game.prototype._inDropZone = function (sx, sy) {
 };
 
 Game.prototype._onTouchStart = function (sx, sy) {
+  this._recordDebugTouch(sx, sy, this.pointerMode);
+
   if (this.gameOver && this._hitRect(this.hitOverlayRestart, sx, sy)) {
     this._restart();
+    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this._hitRect(this.hitRestart, sx, sy)) {
     this._restart();
+    this._recordDebugTouch(sx, sy, 'idle');
+    return;
+  }
+  if (this.hitDrop.w > 0 && this._hitRect(this.hitDrop, sx, sy)) {
+    if (!this.gameOver && this.canDrop) {
+      this._dropFruit();
+    }
+    this.pointerMode = 'idle';
+    this.aiming = false;
+    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
   if (this._hitRect(this.hitSoft, sx, sy)) {
+    this._recordDebugTouch(sx, sy, 'idle');
+    return;
+  }
+  if (this.hitNudgeL.w > 0 && this._hitRect(this.hitNudgeL, sx, sy)) {
+    this._nudgeAim(-1);
+    this._recordDebugTouch(sx, sy, 'idle');
+    return;
+  }
+  if (this.hitNudgeR.w > 0 && this._hitRect(this.hitNudgeR, sx, sy)) {
+    this._nudgeAim(1);
+    this._recordDebugTouch(sx, sy, 'idle');
     return;
   }
 
-  if (this.gameOver || !this.canDrop) return;
-  if (!this._inDropZone(sx, sy)) return;
+  if (this.gameOver || !this.canDrop) {
+    this._recordDebugTouch(sx, sy, 'idle');
+    return;
+  }
+
+  // 非按钮区（含 HUD 空隙与玩法区）：开始瞄准；x→aimX
   var p = this._toLogical(sx, sy);
   this.pointerMode = 'aiming';
   this.aiming = true;
   this.aimX = this._clampAimX(p.x);
+  this._recordDebugTouch(sx, sy, 'aiming');
 };
 
 Game.prototype._onTouchMove = function (sx, sy) {
+  this._recordDebugTouch(sx, sy, this.pointerMode);
   if (this.pointerMode !== 'aiming' || this.gameOver) return;
-  // 拖回 HUD 才取消；左右滑出仍保持瞄准
-  if (sy < (this.HUD_H || 0) - 24) {
+  // 仅明确命中 soft/restart 才取消；其余继续更新 aimX
+  if (this._hitRect(this.hitRestart, sx, sy) || this._hitRect(this.hitSoft, sx, sy)) {
     this.pointerMode = 'cancelled';
     this.aiming = false;
+    this._recordDebugTouch(sx, sy, 'cancelled');
     return;
   }
   var p = this._toLogical(sx, sy);
   this.aimX = this._clampAimX(p.x);
+  this._recordDebugTouch(sx, sy, 'aiming');
 };
 
 Game.prototype._onTouchEnd = function () {
+  // 瞄准中松手一律投放
   if (this.pointerMode === 'aiming' && !this.gameOver && this.canDrop) {
     this._dropFruit();
   }
   this.pointerMode = 'idle';
   this.aiming = false;
+  if (this._debugTouch) this._debugTouch.mode = 'idle';
 };
 
 Game.prototype._dropFruit = function () {
@@ -695,8 +779,41 @@ Game.prototype._drawHUD = function (ctx) {
   var previewScale = Math.min(1, np.r / def.radius);
   drawFruit(ctx, np.x, np.y, def, previewScale, this.fruitImages);
 
+  if (this.hitNudgeL.w > 0) {
+    this._drawButton(ctx, this.hitNudgeL, '◀', false);
+    this._drawButton(ctx, this.hitNudgeR, '▶', false);
+  }
   this._drawButton(ctx, this.hitSoft, '揉软一下', true);
+  this._drawPrimaryButton(ctx, this.hitDrop, '投放');
   this._drawButton(ctx, this.hitRestart, '重新开始', false);
+
+  // Debug: last touch
+  var dbg = this._debugTouch || { x: 0, y: 0, mode: 'idle' };
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillStyle = 'rgba(120, 90, 70, 0.55)';
+  ctx.font = '10px sans-serif';
+  ctx.fillText(
+    'touch:' + dbg.x + ',' + dbg.y + ' mode:' + (dbg.mode || 'idle'),
+    10,
+    hudH - 14
+  );
+};
+
+Game.prototype._drawPrimaryButton = function (ctx, r, label) {
+  var radius = 8;
+  ctx.beginPath();
+  this._roundRectPath(ctx, r.x, r.y, r.w, r.h, radius);
+  ctx.fillStyle = '#2ecc71';
+  ctx.fill();
+  ctx.strokeStyle = '#27ae60';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
 };
 
 Game.prototype._drawButton = function (ctx, r, label, disabled) {
@@ -767,7 +884,7 @@ Game.prototype._drawPlayfield = function (ctx) {
     ctx.fillStyle = '#5a3d2b';
     ctx.font = '12px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('拖动瞄准，松手投放', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
+    ctx.fillText('拖动或点「投放」', LOGICAL_W / 2, DROP_Y - defPend.radius - 8);
     ctx.globalAlpha = 1;
   }
 
