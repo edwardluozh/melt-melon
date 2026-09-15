@@ -9,6 +9,7 @@ var fruits = require('./fruits.js');
 var physics = require('./physics.js');
 var merge = require('./merge.js');
 var scoreMod = require('./score.js');
+var sfx = require('./sfx.js');
 
 var getFruit = fruits.getFruit;
 var drawFruit = fruits.drawFruit;
@@ -511,6 +512,7 @@ Game.prototype._inDropZone = function (sx, sy) {
 };
 
 Game.prototype._onTouchStart = function (sx, sy) {
+  try { sfx.unlock(); } catch (e) {}
   if (this.gameOver && this._hitRect(this.hitOverlayRestart, sx, sy)) {
     this._restart();
     return;
@@ -568,6 +570,7 @@ Game.prototype._dropFruit = function () {
 
   this.pendingLevel = this.nextLevel;
   this.nextLevel = randomDropLevel();
+  try { sfx.play('drop'); } catch (e) {}
 
   try {
     this._render();
@@ -632,6 +635,19 @@ Game.prototype._update = function (dt) {
   }
 
   this.softWorld.step(dtSec, { liquid: this.liquid, tilt: 0 });
+  try {
+    sfx.tick(dtSec);
+    var impacts = this.softWorld.takeImpactEvents();
+    for (var ii = 0; ii < impacts.length; ii++) {
+      var ie = impacts[ii];
+      var br = 30;
+      var bodies = this.softWorld.bodies;
+      for (var bi = 0; bi < bodies.length; bi++) {
+        if (bodies[bi].id === ie.id) { br = bodies[bi].r || bodies[bi].currentRadius || 30; break; }
+      }
+      sfx.playImpact(ie, br);
+    }
+  } catch (eSfx) {}
 
   var self = this;
   processMerges(
@@ -639,8 +655,10 @@ Game.prototype._update = function (dt) {
     function (newLevel, _fromLevel, x, y) {
       // Soften energy restore kept for later skill reuse (UI hidden)
       self.energy = Math.min(ENERGY_DEFAULT, self.energy + ENERGY_RESTORE_MERGE);
+      try { sfx.play('merge', newLevel, 1); } catch (e) {}
       if (newLevel === MELON_LEVEL) {
         self.scoreMgr.addMelon();
+        try { sfx.play('win'); } catch (e) {}
         self.floatTexts.push({
           x: x,
           y: y,
