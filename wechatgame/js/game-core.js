@@ -31,7 +31,7 @@ var processMerges = merge.processMerges;
 var ScoreManager = scoreMod.ScoreManager;
 
 var DROP_COOLDOWN_MS = 450;
-var FAIL_HOLD_MS = 3000;
+var FAIL_HOLD_MS = 1800;
 var ENERGY_DEFAULT = 100;
 var ENERGY_RESTORE_MERGE = 15;
 var SOFTEN_COST = 50;
@@ -690,17 +690,26 @@ Game.prototype._checkFailLine = function () {
   for (var i = 0; i < bodies.length; i++) {
     var body = bodies[i];
     alive[body.id] = true;
-    // Ignore freshly spawned / still growing
-    if (body.age < (body.growthSeconds || 0) + 0.45) {
+    // Ignore freshly spawned / still growing / still falling through the line
+    if (body.age < (body.growthSeconds || 0) + 0.55) {
+      this.failTimers[body.id] = null;
+      continue;
+    }
+    if (body.vy > 55) {
       this.failTimers[body.id] = null;
       continue;
     }
 
+    // Top of fruit crosses danger line (y grows downward)
+    var topY = body.minY != null ? body.minY : (body.y - (body.currentRadius || body.r || 20));
+    var above = topY < FAIL_LINE_Y;
+
+    // Stacked fruits never floor-sleep; treat support + mild motion as settled
+    var speed = Math.hypot(body.vx || 0, body.vy || 0);
     var settled =
       body.isSleeping ||
-      (Math.abs(body.vx) < 12 && Math.abs(body.vy) < 12);
-
-    var above = body.y < FAIL_LINE_Y;
+      ((body.hasSupport || body.hasStableSupport) && speed < 40) ||
+      speed < 18;
 
     if (above && settled) {
       if (this.failTimers[body.id] == null) {

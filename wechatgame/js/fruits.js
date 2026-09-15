@@ -4,16 +4,16 @@
  */
 
 var FRUITS = [
-  { level: 0, name: '葡萄', emoji: '🍇', radius: 16, color: '#b57edc', stroke: '#7a4aa8', score: 1, sprite: 'images/fruit_0.png' },
-  { level: 1, name: '苹果', emoji: '🍎', radius: 22, color: '#ff6b81', stroke: '#c44569', score: 2, sprite: 'images/fruit_1.png' },
-  { level: 2, name: '橘子', emoji: '🍊', radius: 28, color: '#ffa502', stroke: '#e67e22', score: 4, sprite: 'images/fruit_2.png' },
-  { level: 3, name: '柠檬', emoji: '🍋', radius: 34, color: '#f7d060', stroke: '#d4a017', score: 8, sprite: 'images/fruit_3.png' },
-  { level: 4, name: '猕猴桃', emoji: '🥝', radius: 42, color: '#7bed9f', stroke: '#2ed573', score: 16, sprite: 'images/fruit_4.png' },
-  { level: 5, name: '桃', emoji: '🍑', radius: 50, color: '#ff9ff3', stroke: '#f368e0', score: 32, sprite: 'images/fruit_5.png' },
-  { level: 6, name: '哈密瓜', emoji: '🍈', radius: 56, color: '#e8c878', stroke: '#c9a24a', score: 48, sprite: 'images/fruit_6.png' },
-  { level: 7, name: '椰子', emoji: '🥥', radius: 62, color: '#8b5a2b', stroke: '#5c3a1a', score: 72, sprite: 'images/fruit_7.png' },
-  { level: 8, name: '半西瓜', emoji: '🍉', radius: 68, color: '#ff4757', stroke: '#c0392b', score: 96, sprite: 'images/fruit_8.png' },
-  { level: 9, name: '完整西瓜', emoji: '🍉', radius: 76, color: '#2ed573', stroke: '#1e9d4b', score: 160, sprite: 'images/fruit_9.png' },
+  { level: 0, name: '葡萄', emoji: '🍇', radius: 18, color: '#b57edc', stroke: '#7a4aa8', score: 1, sprite: 'images/fruit_0.png' },
+  { level: 1, name: '苹果', emoji: '🍎', radius: 25, color: '#ff6b81', stroke: '#c44569', score: 2, sprite: 'images/fruit_1.png' },
+  { level: 2, name: '橘子', emoji: '🍊', radius: 32, color: '#ffa502', stroke: '#e67e22', score: 4, sprite: 'images/fruit_2.png' },
+  { level: 3, name: '柠檬', emoji: '🍋', radius: 39, color: '#f7d060', stroke: '#d4a017', score: 8, sprite: 'images/fruit_3.png' },
+  { level: 4, name: '猕猴桃', emoji: '🥝', radius: 48, color: '#7bed9f', stroke: '#2ed573', score: 16, sprite: 'images/fruit_4.png' },
+  { level: 5, name: '桃', emoji: '🍑', radius: 57, color: '#ff9ff3', stroke: '#f368e0', score: 32, sprite: 'images/fruit_5.png' },
+  { level: 6, name: '哈密瓜', emoji: '🍈', radius: 64, color: '#e8c878', stroke: '#c9a24a', score: 48, sprite: 'images/fruit_6.png' },
+  { level: 7, name: '椰子', emoji: '🥥', radius: 71, color: '#8b5a2b', stroke: '#5c3a1a', score: 72, sprite: 'images/fruit_7.png' },
+  { level: 8, name: '半西瓜', emoji: '🍉', radius: 78, color: '#ff4757', stroke: '#c0392b', score: 96, sprite: 'images/fruit_8.png' },
+  { level: 9, name: '完整西瓜', emoji: '🍉', radius: 86, color: '#2ed573', stroke: '#1e9d4b', score: 160, sprite: 'images/fruit_9.png' },
 ];
 
 var DROP_LEVEL_COUNT = 3;

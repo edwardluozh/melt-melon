@@ -8,8 +8,8 @@ var LOGICAL_H = 667;
 var WALL_LEFT = 8;
 var WALL_RIGHT = 367;
 var FLOOR_Y = LOGICAL_H - 6; // 661 — sit near rounded playfield edge
-var FAIL_LINE_Y = 90;
-var DROP_Y = 52;
+var FAIL_LINE_Y = 140;
+var DROP_Y = 58;
 var MAX_BODIES = 48;
 
 function createSoftWorld() {
