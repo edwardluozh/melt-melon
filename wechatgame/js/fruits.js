@@ -1,5 +1,6 @@
 /**
- * 水果定义与绘制（8 阶精灵）
+ * 水果定义与绘制（10 阶精灵）
+ * 桃 → 哈密瓜 → 椰子 → 半西瓜 → 完整西瓜
  */
 
 var FRUITS = [
@@ -9,8 +10,10 @@ var FRUITS = [
   { level: 3, name: '柠檬', emoji: '🍋', radius: 34, color: '#f7d060', stroke: '#d4a017', score: 8, sprite: 'images/fruit_3.png' },
   { level: 4, name: '猕猴桃', emoji: '🥝', radius: 42, color: '#7bed9f', stroke: '#2ed573', score: 16, sprite: 'images/fruit_4.png' },
   { level: 5, name: '桃', emoji: '🍑', radius: 50, color: '#ff9ff3', stroke: '#f368e0', score: 32, sprite: 'images/fruit_5.png' },
-  { level: 6, name: '半西瓜', emoji: '🍉', radius: 60, color: '#ff4757', stroke: '#c0392b', score: 64, sprite: 'images/fruit_6.png' },
-  { level: 7, name: '完整西瓜', emoji: '🍉', radius: 71, color: '#2ed573', stroke: '#1e9d4b', score: 128, sprite: 'images/fruit_7.png' },
+  { level: 6, name: '哈密瓜', emoji: '🍈', radius: 56, color: '#e8c878', stroke: '#c9a24a', score: 48, sprite: 'images/fruit_6.png' },
+  { level: 7, name: '椰子', emoji: '🥥', radius: 62, color: '#8b5a2b', stroke: '#5c3a1a', score: 72, sprite: 'images/fruit_7.png' },
+  { level: 8, name: '半西瓜', emoji: '🍉', radius: 68, color: '#ff4757', stroke: '#c0392b', score: 96, sprite: 'images/fruit_8.png' },
+  { level: 9, name: '完整西瓜', emoji: '🍉', radius: 76, color: '#2ed573', stroke: '#1e9d4b', score: 160, sprite: 'images/fruit_9.png' },
 ];
 
 var DROP_LEVEL_COUNT = 3;
@@ -19,8 +22,8 @@ function getFruit(level) {
   return FRUITS[Math.max(0, Math.min(level, FRUITS.length - 1))];
 }
 
-/** 完整西瓜（整颗条纹西瓜，level 7）为最终目标；半西瓜（level 6）为倒数第二阶 */
-var MELON_LEVEL = 7;
+/** 完整西瓜（level 9）为最终目标；链：桃→哈密瓜→椰子→半西瓜→完整西瓜 */
+var MELON_LEVEL = 9;
 
 function nextLevel(level) {
   if (level >= MELON_LEVEL) return null;
