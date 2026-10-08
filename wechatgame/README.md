@@ -16,7 +16,7 @@
 - 手指左右拖动瞄准，松手投放
 - 相同水果接触合成下一级；合成出最高级「完整西瓜」时本局西瓜数 +1
 - 顶部 HUD：左侧西瓜图标 + 本局数量；右侧仅「重新开始」
-- 水果质心在危险线上方静止约 3 秒则游戏结束
+- 水果质心在危险线上方静止约 1.8 秒则游戏结束
 - 历史最佳西瓜数键名：`melt-melon-melon-high`（结算页展示；`wx.getStorageSync` / `setStorageSync`）
 
 ## 目录说明
@@ -33,7 +33,6 @@ wechatgame/
     merge.js                   # SoftWorld contacts 合成
     score.js                   # 本局 / 历史西瓜计数
     game-core.js               # 主 Game（Canvas + 触摸）
-    matter.min.js              # 未使用（可删）
   README.md
 ```
 
